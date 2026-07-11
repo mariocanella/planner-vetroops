@@ -1147,6 +1147,8 @@ function mostraProposteCapVicini(comune, proposte, c) {
 }
 
 let pollHandle = null;
+let battitoHandle = null;
+let battitoContatore = 0;
 async function renderShell() {
   const r = roles[state.user];
   root.innerHTML = `
@@ -1167,6 +1169,8 @@ async function renderShell() {
     <div class="tabbar" id="tabbar"></div>
     <div class="content" id="content"></div>
     <div class="footer-note">Dati condivisi tra tutti i planner · ultimo aggiornamento automatico ogni 25s</div>
+    <div class="footer-note" id="debug-contatori" style="font-family:ui-monospace,monospace;opacity:.6"></div>
+    <div class="footer-note" id="debug-battito" style="font-family:ui-monospace,monospace;opacity:.6"></div>
   `;
   document.getElementById('btn-logout').onclick = logout;
   document.getElementById('btn-changepw').onclick = () => openChangePasswordModal();
@@ -1198,6 +1202,13 @@ async function renderShell() {
     console.error('Errore nel caricamento iniziale dei dati', e);
     mostraErroreInContenuto(e);
   }
+
+  if (battitoHandle) clearInterval(battitoHandle);
+  battitoHandle = setInterval(() => {
+    battitoContatore++;
+    const el = document.getElementById('debug-battito');
+    if (el) el.textContent = `battito: ${battitoContatore} (se questo numero smette di aumentare, la pagina è davvero bloccata)`;
+  }, 1000);
 
   if (pollHandle) clearInterval(pollHandle);
   pollHandle = setInterval(async () => {
@@ -1247,8 +1258,17 @@ function setActiveTabBtn() {
   });
 }
 
+function aggiornaContatoriDebug() {
+  const el = document.getElementById('debug-contatori');
+  if (!el) return;
+  try {
+    el.textContent = `debug: job=${(state.jobs||[]).length} tecnici=${tecnici.length} sedi=${sedi.length} dispo=${Object.keys(state.dispo||{}).length} dispoTurnistica=${Object.keys(state.dispoTurnistica||{}).length} capMap=${Object.keys(capMap||{}).length}`;
+  } catch (e) { /* non bloccare per un errore nel debug stesso */ }
+}
+
 function renderTab() {
   setActiveTabBtn();
+  aggiornaContatoriDebug();
   const c = document.getElementById('content');
   if (!c) return;
   try {
