@@ -365,7 +365,7 @@ table.ferie td.ferie-cell:hover{outline:2px solid var(--brand);outline-offset:-2
 
   window.__fsGet = async function (key) {
     const url = `${FIRESTORE_BASE}/${encodeURIComponent(key)}?key=${FIRESTORE_CONFIG.apiKey}`;
-    const res = await fsFetchConTimeout(url, {}, 10000);
+    const res = await fsFetchConTimeout(url, {}, 5000);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error('Firestore GET fallito: ' + res.status);
     const data = await res.json();
@@ -378,7 +378,7 @@ table.ferie td.ferie-cell:hover{outline:2px solid var(--brand);outline-offset:-2
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    }, 10000);
+    }, 5000);
     if (!res.ok) throw new Error('Firestore SET fallito: ' + res.status);
     return true;
   };
