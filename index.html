@@ -502,17 +502,14 @@ function rebuildIndici() {
 }
 
 async function loadAnagrafica() {
-  tracciaPasso('loadAnagrafica: avvio, aspetto firebaseReady');
   try {
     await window.__firebaseReady;
-    tracciaPasso('loadAnagrafica: firebaseReady ok, chiedo 4 documenti');
     const [vSedi, vTecnici, vOwner, vCapMap] = await Promise.all([
       window.__fsGet('sedi_custom'),
       window.__fsGet('tecnici_custom'),
       window.__fsGet('sede_owner'),
       window.__fsGet('capmap_custom'),
     ]);
-    tracciaPasso(`loadAnagrafica: 4 documenti ricevuti (sedi=${vSedi?vSedi.length:0}b tecnici=${vTecnici?vTecnici.length:0}b capMap=${vCapMap?vCapMap.length:0}b)`);
     if (vSedi && vTecnici) {
       const parsedSedi = JSON.parse(vSedi);
       const parsedTecnici = JSON.parse(vTecnici);
@@ -571,9 +568,7 @@ async function loadAnagrafica() {
     });
     capMap = capMapFallback;
   }
-  tracciaPasso(`loadAnagrafica: prima di rebuildIndici (sedi=${sedi.length} tecnici=${tecnici.length} capMap=${Object.keys(capMap).length})`);
   rebuildIndici();
-  tracciaPasso('loadAnagrafica: rebuildIndici finito, funzione completata');
 }
 async function saveSediCustom() { try { await window.__firebaseReady; await window.__fsSet('sedi_custom', JSON.stringify(sedi)); return true; } catch (e) { console.error(e); return false; } }
 async function saveTecniciCustom() { try { await window.__firebaseReady; await window.__fsSet('tecnici_custom', JSON.stringify(tecnici)); return true; } catch (e) { console.error(e); return false; } }
@@ -1158,10 +1153,7 @@ function mostraProposteCapVicini(comune, proposte, c) {
 }
 
 let pollHandle = null;
-let battitoHandle = null;
-let battitoContatore = 0;
 async function renderShell() {
-  tracciaPasso('renderShell: avvio');
   const r = roles[state.user];
   root.innerHTML = `
     <div class="topbar">
@@ -1181,8 +1173,6 @@ async function renderShell() {
     <div class="tabbar" id="tabbar"></div>
     <div class="content" id="content"></div>
     <div class="footer-note">Dati condivisi tra tutti i planner · ultimo aggiornamento automatico ogni 25s</div>
-    <div class="footer-note" id="debug-contatori" style="font-family:ui-monospace,monospace;opacity:.6"></div>
-    <div class="footer-note" id="debug-battito" style="font-family:ui-monospace,monospace;opacity:.6"></div>
   `;
   document.getElementById('btn-logout').onclick = logout;
   document.getElementById('btn-changepw').onclick = () => openChangePasswordModal();
@@ -1208,23 +1198,12 @@ async function renderShell() {
   });
 
   try {
-    tracciaPasso('renderShell: chiamo refreshData()');
     await refreshData();
-    tracciaPasso('renderShell: refreshData() finito, chiamo renderTab()');
     renderTab();
-    tracciaPasso('renderShell: renderTab() finito');
   } catch (e) {
     console.error('Errore nel caricamento iniziale dei dati', e);
-    tracciaPasso('renderShell: ERRORE ' + (e && e.message));
     mostraErroreInContenuto(e);
   }
-
-  if (battitoHandle) clearInterval(battitoHandle);
-  battitoHandle = setInterval(() => {
-    battitoContatore++;
-    const el = document.getElementById('debug-battito');
-    if (el) el.textContent = `battito: ${battitoContatore} (se questo numero smette di aumentare, la pagina è davvero bloccata)`;
-  }, 1000);
 
   if (pollHandle) clearInterval(pollHandle);
   pollHandle = setInterval(async () => {
@@ -1255,58 +1234,10 @@ function mostraErroreInContenuto(e) {
 
 // Traccia visibile in pagina di ogni passo del caricamento dati, per capire dove si ferma
 // senza bisogno di Console/Inspector. Compare in basso a destra, sempre in vista.
-const TRACCIA_LS_KEY = 'planner_traccia_ultima_sessione';
-function tracciaPasso(msg) {
-  try {
-    let box = document.getElementById('traccia-box');
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'traccia-box';
-      box.style.cssText = 'position:fixed;top:6px;right:6px;background:rgba(20,30,25,.92);color:#9FE0B8;padding:8px 10px;font-family:ui-monospace,Menlo,monospace;font-size:10px;line-height:1.5;z-index:99999;max-height:45vh;max-width:340px;overflow:auto;white-space:pre-wrap;border-radius:8px;pointer-events:none;';
-      document.body.appendChild(box);
-    }
-    const ts = new Date().toISOString().slice(11, 23);
-    box.textContent = `[${ts}] ${msg}\n` + box.textContent;
-    // Salva anche in localStorage: sopravvive pure a un crash/blocco totale della pagina,
-    // così al prossimo caricamento possiamo recuperare cosa è successo prima del blocco.
-    try {
-      localStorage.setItem(TRACCIA_LS_KEY, box.textContent.slice(0, 8000));
-    } catch (e2) { /* localStorage pieno o non disponibile: pazienza, continuiamo comunque */ }
-  } catch (e) { /* mai bloccare per la traccia stessa */ }
-}
-function mostraTracciaSessionePrecedente() {
-  try {
-    const salvata = localStorage.getItem(TRACCIA_LS_KEY);
-    if (!salvata) return;
-    const box = document.createElement('div');
-    box.id = 'traccia-precedente-box';
-    box.style.cssText = 'position:fixed;top:6px;left:6px;background:rgba(31,74,68,.96);color:#fff;padding:10px 12px;font-family:ui-monospace,Menlo,monospace;font-size:10px;line-height:1.5;z-index:99999;max-height:60vh;max-width:380px;overflow:auto;white-space:pre-wrap;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);pointer-events:none;';
-    const titolo = document.createElement('div');
-    titolo.textContent = "📋 Traccia dell'ultima sessione (prima di ricaricare)";
-    titolo.style.cssText = 'font-weight:700;margin-bottom:6px;font-family:-apple-system,sans-serif;font-size:11px;';
-    const chiudi = document.createElement('button');
-    chiudi.textContent = '✕ Chiudi e cancella';
-    chiudi.style.cssText = 'display:block;background:#fff;color:#1F4A44;border:none;border-radius:6px;padding:4px 10px;font-weight:700;cursor:pointer;font-family:-apple-system,sans-serif;font-size:10px;margin-top:8px;pointer-events:auto;';
-    chiudi.onclick = () => { localStorage.removeItem(TRACCIA_LS_KEY); box.remove(); };
-    const testo = document.createElement('div');
-    testo.textContent = salvata;
-    box.appendChild(titolo);
-    box.appendChild(testo);
-    box.appendChild(chiudi);
-    document.body.appendChild(box);
-  } catch (e) { /* niente da fare */ }
-}
-
 async function refreshData() {
-  tracciaPasso('refreshData: avvio (in parallelo)');
-  const p1 = loadJobs().then(r => { tracciaPasso('loadJobs: completato'); return r; });
-  const p2 = loadDispo().then(r => { tracciaPasso('loadDispo: completato'); return r; });
-  const p3 = loadDispoTurnistica().then(r => { tracciaPasso('loadDispoTurnistica: completato'); return r; });
-  const p4 = loadAuth().then(r => { tracciaPasso('loadAuth: completato'); return r; });
-  const p5 = loadAnagrafica().then(r => { tracciaPasso('loadAnagrafica: completato'); return r; });
-  tracciaPasso('refreshData: 5 richieste avviate, in attesa...');
-  const [jobs, dispo, dispoTurnistica, auth] = await Promise.all([p1, p2, p3, p4, p5]);
-  tracciaPasso('refreshData: TUTTO completato');
+  const [jobs, dispo, dispoTurnistica, auth] = await Promise.all([
+    loadJobs(), loadDispo(), loadDispoTurnistica(), loadAuth(), loadAnagrafica(),
+  ]);
   state.jobs = jobs;
   state.dispo = dispo;
   state.dispoTurnistica = dispoTurnistica;
@@ -1324,18 +1255,8 @@ function setActiveTabBtn() {
   });
 }
 
-function aggiornaContatoriDebug() {
-  const el = document.getElementById('debug-contatori');
-  if (!el) return;
-  try {
-    el.textContent = `debug: job=${(state.jobs||[]).length} tecnici=${tecnici.length} sedi=${sedi.length} dispo=${Object.keys(state.dispo||{}).length} dispoTurnistica=${Object.keys(state.dispoTurnistica||{}).length} capMap=${Object.keys(capMap||{}).length}`;
-  } catch (e) { /* non bloccare per un errore nel debug stesso */ }
-}
-
 function renderTab() {
   setActiveTabBtn();
-  aggiornaContatoriDebug();
-  tracciaPasso(`renderTab: dispatch verso '${state.tab}'`);
   const c = document.getElementById('content');
   if (!c) return;
   try {
@@ -1347,7 +1268,6 @@ function renderTab() {
     else if (state.tab === 'ferie') { state.tab = 'tecnici'; renderTecnici(c); }
     else if (state.tab === 'tecnici') renderTecnici(c);
     else if (state.tab === 'dashboard') renderDashboard(c);
-    tracciaPasso(`renderTab: '${state.tab}' disegnato con successo`);
   } catch (e) {
     console.error('Errore nel disegnare la schermata', e);
     mostraErroreInContenuto(e);
@@ -3106,7 +3026,6 @@ window.addEventListener('unhandledrejection', function (event) {
 });
 
 // ---------- avvio ----------
-mostraTracciaSessionePrecedente();
 init();
 
 </script>
