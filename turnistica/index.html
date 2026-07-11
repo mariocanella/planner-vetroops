@@ -9,6 +9,44 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
+<script>
+  // Accesso diretto all'API REST di Firestore, senza la libreria SDK completa:
+  // più semplice, più leggero, con timeout esplicito (nessun blocco a tempo indeterminato).
+  window.__firebaseReady = Promise.resolve();
+
+  const FIRESTORE_CONFIG = {
+    apiKey: "AIzaSyBFFXNjEgmlDYrCODpiUEYUypGgD0eWP4g",
+    projectId: "planner-sm",
+  };
+  const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_CONFIG.projectId}/databases/(default)/documents/planner_kv`;
+
+  function fsFetchConTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, Object.assign({}, options || {}, { signal: controller.signal }))
+      .finally(() => clearTimeout(timer));
+  }
+
+  window.__fsGet = async function (key) {
+    const url = `${FIRESTORE_BASE}/${encodeURIComponent(key)}?key=${FIRESTORE_CONFIG.apiKey}`;
+    const res = await fsFetchConTimeout(url, {}, 10000);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error('Firestore GET fallito: ' + res.status);
+    const data = await res.json();
+    return (data.fields && data.fields.value && data.fields.value.stringValue != null) ? data.fields.value.stringValue : null;
+  };
+  window.__fsSet = async function (key, value) {
+    const url = `${FIRESTORE_BASE}/${encodeURIComponent(key)}?key=${FIRESTORE_CONFIG.apiKey}`;
+    const body = { fields: { value: { stringValue: value }, updatedAt: { integerValue: String(Date.now()) } } };
+    const res = await fsFetchConTimeout(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, 10000);
+    if (!res.ok) throw new Error('Firestore SET fallito: ' + res.status);
+    return true;
+  };
+</script>
 <style>
 :root{
   --bg:#F5F7F9;
@@ -328,7 +366,7 @@ tr:hover .row-actions{opacity:1;}
 </div>
 
 <div class="footer-hint">
-  <span>Clic su una cella per assegnare turno/assenza · clic su un nome per rinominare · <span id="autosaveStatus" style="color:var(--muted)">salvataggio automatico solo nel browser — collega un file per un salvataggio più sicuro</span></span>
+  <span>Clic su una cella per assegnare turno/assenza · clic su un nome per rinominare · <span id="autosaveStatus" style="color:var(--muted)">salvataggio automatico solo nel browser — collega un file per un salvataggio più sicuro</span> · <span id="officinaSyncStatus" style="color:var(--muted)">sincronizzazione con Planner Officina Mobile in corso…</span></span>
   <span id="statTotals"></span>
 </div>
 
@@ -455,8 +493,113 @@ function saveDB(){
   localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
   scheduleAutosaveWrite();
   autoBackupDirty = true;
+  scheduleSyncOfficinaMobile();
 }
 function uid(){ return Math.random().toString(36).slice(2,9); }
+
+/* =========================================================
+   SINCRONIZZAZIONE CON PLANNER OFFICINA MOBILE (Firebase condiviso)
+   Calcola, per ogni dipendente e per una finestra di date, se quel giorno
+   è un'assenza (ferie/malattia/infortunio/altro) o un turno di lavoro
+   normale, e scrive il risultato su una chiave separata del database
+   condiviso: "disponibilita_turnistica". Planner Officina Mobile la legge
+   in sola lettura e la combina con le proprie assenze improvvise dirette.
+   ========================================================= */
+const OFFICINA_ASSENZA_MAP = { FE:"ferie", MA:"malattia", INF:"infortunio" };
+const OFFICINA_ORIZZONTE_PASSATO = 7;   // giorni indietro (per correzioni recenti)
+const OFFICINA_ORIZZONTE_FUTURO = 400;  // giorni avanti (copre piano ferie annuale)
+
+function officinaClassificaCode(code){
+  if(!code) return "disponibile";
+  if(isWorkedCode(code)) return "disponibile";
+  if(isAbsenceCode(code)) return OFFICINA_ASSENZA_MAP[code] || "indisponibile";
+  return "disponibile";
+}
+function officinaNormalizzaNome(n){ return (n||"").trim().toUpperCase(); }
+function officinaIsoDate(y,m,d){ return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+
+function officinaRaccogliDipendenti(){
+  // Mappa id -> nome, aggregando i tecnici (hub.employees) di tutti i mesi noti.
+  // Manager e planner non sono inclusi: Planner Officina Mobile gestisce solo i tecnici di campo.
+  const mappa = {};
+  Object.values(DB.months || {}).forEach(month=>{
+    (month.areas || []).forEach(area=>{
+      (area.hubs || []).forEach(hub=>{
+        (hub.employees || []).forEach(emp=>{ mappa[emp.id] = emp.name; });
+      });
+    });
+  });
+  return mappa;
+}
+function officinaTrovaEmp(empId, key){
+  const month = DB.months[key];
+  if(!month) return null;
+  for(const area of (month.areas || [])){
+    for(const hub of (area.hubs || [])){
+      for(const emp of (hub.employees || [])){
+        if(emp.id === empId) return emp;
+      }
+    }
+  }
+  return null;
+}
+function officinaCalcolaDisponibilita(){
+  const dipendenti = officinaRaccogliDipendenti();
+  const risultato = {};
+  const oggi = new Date();
+  for(let offset = -OFFICINA_ORIZZONTE_PASSATO; offset <= OFFICINA_ORIZZONTE_FUTURO; offset++){
+    const d0 = new Date(oggi);
+    d0.setDate(d0.getDate() + offset);
+    const y = d0.getFullYear(), m = d0.getMonth()+1, giorno = d0.getDate();
+    const iso = officinaIsoDate(y, m, giorno);
+    const key = y + "-" + String(m).padStart(2,"0");
+    const month = DB.months[key];
+
+    Object.entries(dipendenti).forEach(([empId, nome])=>{
+      let code = null;
+      if(month){
+        const emp = officinaTrovaEmp(empId, key);
+        if(emp){
+          if(emp.days && emp.days[giorno]) code = emp.days[giorno];
+          else if(isDateInVacation(empId, y, m, giorno)) code = "FE";
+        }
+      } else if(isDateInVacation(empId, y, m, giorno)){
+        code = "FE";
+      }
+      const stato = officinaClassificaCode(code);
+      if(stato !== "disponibile"){
+        const chiave = `${iso}|${officinaNormalizzaNome(nome)}`;
+        risultato[chiave] = { tipo: stato, note: "Da Turnistica" };
+      }
+    });
+  }
+  return risultato;
+}
+
+let officinaSyncTimer = null;
+function scheduleSyncOfficinaMobile(){
+  if (window.location.protocol === 'file:') return; // niente sync possibile in locale
+  clearTimeout(officinaSyncTimer);
+  officinaSyncTimer = setTimeout(syncOfficinaMobileNow, 1200);
+}
+async function syncOfficinaMobileNow(){
+  try{
+    await window.__firebaseReady;
+    const dati = officinaCalcolaDisponibilita();
+    await window.__fsSet("disponibilita_turnistica", JSON.stringify(dati));
+    setOfficinaSyncStatus("● sincronizzato con Planner Officina Mobile", true);
+  }catch(e){
+    console.error("Sincronizzazione con Planner Officina Mobile fallita", e);
+    setOfficinaSyncStatus("● sincronizzazione non riuscita (controlla la connessione)", false);
+  }
+}
+function setOfficinaSyncStatus(text, ok){
+  const el = document.getElementById("officinaSyncStatus");
+  if(!el) return;
+  el.textContent = text;
+  el.style.color = ok===true ? "#2F8F5B" : ok===false ? "#B23B4A" : "var(--muted)";
+}
+
 
 function daysInMonth(key){
   const [y,m] = key.split("-").map(Number);
@@ -804,20 +947,16 @@ function computeDefaultCode(empIdx, y, m, d, blocks, baseCode, fridayCompCode){
   baseCode = baseCode || "E";
   fridayCompCode = fridayCompCode || "AA";
   const dow = new Date(y,m-1,d).getDay();
-
-  function worksSaturdayFor(satDay){
-    // satDay può eccedere i giorni del mese (es. 32): JS Date lo gestisce correttamente
-    const weekNum = weekNumberForDate(y, m, satDay);
-    return (weekNum % 2) === (empIdx % 2);
+  const block = blockForDay(blocks, d);
+  const startsOnSaturday = new Date(y,m-1,block.start).getDay() === 6;
+  let worksSaturday = false;
+  if(startsOnSaturday){
+    const weekNum = weekNumberForDate(y,m,block.start);
+    worksSaturday = (weekNum % 2) === (empIdx % 2);
   }
-
-  if(dow===6) return worksSaturdayFor(d) ? "AA" : "RS8";
+  if(dow===6) return worksSaturday ? "AA" : "RS8";
   if(dow===0) return "RS8";
-  if(dow===5){
-    // Il sabato di riferimento per un venerdì è quello immediatamente successivo (giorno dopo),
-    // non quello che apre il blocco settimanale sabato→venerdì di appartenenza del venerdì stesso.
-    return worksSaturdayFor(d+1) ? fridayCompCode : baseCode;
-  }
+  if(dow===5) return worksSaturday ? fridayCompCode : baseCode;
   return baseCode;
 }
 function getEffectiveCode(emp, empIdx, y, m, d, blocks){
@@ -1968,6 +2107,11 @@ tryReconnectAutosave();
    INIT
    ========================================================= */
 render();
+if (window.location.protocol === 'file:') {
+  setOfficinaSyncStatus("● aperto in locale: la sincronizzazione con Planner Officina Mobile è disattiva (carica questo file online per attivarla)", false);
+} else {
+  scheduleSyncOfficinaMobile();
+}
 </script>
 </body>
 </html>
