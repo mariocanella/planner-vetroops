@@ -1,0 +1,1973 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VetroOps · Turnistica</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.25/dist/jspdf.plugin.autotable.min.js"></script>
+<style>
+:root{
+  --bg:#F5F7F9;
+  --surface:#FFFFFF;
+  --ink:#12213A;
+  --ink-soft:#3D4A5F;
+  --muted:#7C8697;
+  --line:#DCE2EA;
+  --line-soft:#EAEEF3;
+  --accent:#2F7A8C;
+  --accent-deep:#1F5867;
+  --weekend:#EEF3F6;
+  --today:#FFF6E0;
+  --radius:10px;
+  --shadow: 0 1px 2px rgba(18,33,58,0.06), 0 4px 16px rgba(18,33,58,0.06);
+  font-family:'IBM Plex Sans', system-ui, sans-serif;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);height:100%;}
+body{display:flex;flex-direction:column;overflow:hidden;}
+
+::-webkit-scrollbar{height:10px;width:10px;}
+::-webkit-scrollbar-thumb{background:#C6CEDA;border-radius:6px;}
+::-webkit-scrollbar-track{background:transparent;}
+
+/* ---------- Topbar ---------- */
+.topbar{
+  display:flex;align-items:center;gap:16px;
+  padding:10px 18px;background:var(--surface);
+  border-bottom:1px solid var(--line);flex-shrink:0;
+  flex-wrap:wrap;
+}
+.brand{display:flex;align-items:center;gap:10px;margin-right:4px;}
+.brand .mark{
+  width:30px;height:30px;border-radius:8px;
+  background:linear-gradient(135deg, var(--accent), var(--accent-deep));
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:14px;
+  flex-shrink:0;
+}
+.brand .txt{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;line-height:1.1;}
+.brand .txt small{display:block;font-family:'IBM Plex Sans';font-weight:400;font-size:11px;color:var(--muted);letter-spacing:.02em;}
+
+.month-nav{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:4px;}
+.month-nav button{
+  width:28px;height:28px;border-radius:999px;border:none;background:transparent;
+  cursor:pointer;color:var(--ink-soft);font-size:15px;display:flex;align-items:center;justify-content:center;
+}
+.month-nav button:hover{background:var(--line-soft);}
+.month-nav .label{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14px;min-width:150px;text-align:center;text-transform:capitalize;}
+
+.spacer{flex:1;}
+
+.search-box{position:relative;}
+.search-box input{
+  padding:7px 12px 7px 30px;border:1px solid var(--line);border-radius:999px;
+  font-size:13px;width:190px;background:var(--bg);color:var(--ink);font-family:inherit;
+}
+.search-box input:focus{outline:2px solid var(--accent);outline-offset:1px;background:var(--surface);}
+.search-box::before{content:"⌕";position:absolute;left:12px;top:6px;color:var(--muted);font-size:14px;}
+
+.btn{
+  border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);
+  padding:7px 13px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;font-family:inherit;white-space:nowrap;
+  transition:background .12s, border-color .12s;
+}
+.btn:hover{background:var(--line-soft);border-color:#C6CEDA;}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+.btn.primary:hover{background:var(--accent-deep);}
+.btn.ghost{border-color:transparent;background:transparent;}
+.btn.ghost:hover{background:var(--line-soft);}
+
+/* ---------- Layout ---------- */
+.workspace{flex:1;display:flex;min-height:0;}
+.grid-wrap{flex:1;overflow:auto;position:relative;background:var(--surface);}
+
+table.plan{border-collapse:separate;border-spacing:0;font-size:12.5px;min-width:100%;}
+table.plan th, table.plan td{border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);}
+
+/* sticky first columns */
+.col-area, .col-grade, .col-name{position:sticky;background:var(--surface);z-index:3;}
+.col-area{left:0;width:26px;min-width:26px;max-width:26px;}
+.col-grade{left:26px;width:74px;min-width:74px;}
+.col-name{left:100px;width:190px;min-width:190px;box-shadow:2px 0 4px rgba(18,33,58,0.04);}
+
+thead th{position:sticky;top:20px;background:var(--ink);color:#fff;z-index:4;font-weight:500;}
+thead .col-area, thead .col-grade, thead .col-name{z-index:6;background:var(--ink);}
+thead tr.title-row th{background:var(--ink);}
+
+thead tr.week-row th{
+  position:sticky;top:0;height:20px;padding:2px 4px;
+  background:#FBF1DD;color:#5C4A1F;font-size:9.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.04em;z-index:5;
+  border-right:1px solid rgba(0,0,0,0.08);
+}
+thead tr.week-row .col-area, thead tr.week-row .col-grade, thead tr.week-row .col-name{
+  background:#FBF1DD;z-index:7;
+}
+.week-cell:nth-child(odd){background:#F4E3BC;}
+.week-cell{border-right:5px solid #C9821E;}
+
+.head-day{width:34px;min-width:34px;text-align:center;padding:2px 0;}
+.head-day .dow{display:block;font-size:9.5px;color:#B9C4D6;text-transform:uppercase;letter-spacing:.03em;}
+.head-day .num{display:block;font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:600;}
+.head-day.weekend{background:#0C1728;}
+.head-day.sunday{background:var(--accent-deep);}
+
+td.cell-day{width:34px;min-width:34px;text-align:center;cursor:pointer;padding:0;height:30px;position:relative;}
+td.cell-day.weekend{background:var(--weekend);}
+td.cell-day.sunday{background:rgba(31,88,103,0.16);}
+td.cell-day:hover{outline:2px solid var(--accent);outline-offset:-2px;}
+td.cell-day.selected{background:rgba(47,122,140,0.28) !important;outline:2px solid var(--accent);outline-offset:-2px;}
+.chip{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:20px;border-radius:5px;font-size:10.5px;font-weight:600;
+  font-family:'IBM Plex Mono',monospace;color:#fff;line-height:1;
+}
+td.cell-day.auto .chip{opacity:0.62;}
+
+/* row types */
+tr.row-area-header td, tr.row-area-header th{
+  background:var(--accent-deep);color:#fff;font-family:'Space Grotesk',sans-serif;
+  font-weight:600;font-size:12.5px;padding:7px 10px;position:sticky;left:0;
+}
+tr.row-area-header .col-area,tr.row-area-header .col-grade,tr.row-area-header .col-name{background:var(--accent-deep);}
+tr.row-area-header td.spanner{position:static;background:var(--accent-deep);}
+
+tr.row-manager .col-name, tr.row-manager .col-grade, tr.row-manager .col-area{background:#F3F0FF;}
+tr.row-manager td.cell-day{background:#F9F8FF;}
+.tag{
+  font-size:9.5px;font-weight:600;padding:2px 6px;border-radius:5px;letter-spacing:.02em;
+  display:inline-block;color:#fff;
+}
+.tag.cmm{background:#5B4B8A;}
+.tag.pl{background:#7C6BAE;}
+.tag.skilled{background:#2F7A8C;}
+.tag.senior{background:#B5762E;}
+.tag.expert{background:#8C2F4A;}
+.tag.trainee{background:#4C7A3A;}
+.tag.altro{background:#7C8697;}
+
+tr.row-hub td.col-name, tr.row-hub td.col-grade, tr.row-hub td.col-area{
+  background:var(--hub-color, #EAF2F4);font-weight:600;color:#fff;font-size:12px;
+}
+tr.row-hub td.cell-day{background:var(--hub-color-light, #F3F8F9);}
+tr.row-hub .icon-btn{color:rgba(255,255,255,0.75);}
+tr.row-hub .icon-btn:hover{background:rgba(255,255,255,0.25);color:#fff;}
+tr.row-hub .editable:hover{background:rgba(255,255,255,0.18);}
+tr.row-hub .editable:focus{background:rgba(255,255,255,0.92);color:var(--ink);}
+
+tr.row-coverage td.col-name, tr.row-coverage td.col-grade, tr.row-coverage td.col-area{
+  background:#FAFAF6;color:var(--muted);font-size:10px;font-style:italic;
+}
+tr.row-coverage td.cell-day{background:#FAFAF6;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:10px;padding:0;}
+.cov-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:16px;border-radius:4px;font-weight:600;}
+.cov-full{color:#2F8F5B;}
+.cov-partial{color:#C9821E;}
+.cov-zero{color:#B23B4A;background:#FBE4E7;border-radius:4px;}
+
+.editable{outline:none;border-radius:4px;padding:1px 3px;cursor:text;}
+.editable:hover{background:var(--line-soft);}
+.editable:focus{background:#fff;box-shadow:0 0 0 2px var(--accent);}
+
+.name-cell{display:flex;align-items:center;gap:6px;padding:4px 8px 4px 4px;}
+.row-actions{display:flex;gap:2px;opacity:0;transition:opacity .1s;}
+tr:hover .row-actions{opacity:1;}
+.icon-btn{
+  width:18px;height:18px;border:none;background:transparent;color:var(--muted);
+  cursor:pointer;font-size:12px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.icon-btn:hover{background:#FCE3E8;color:#A6303F;}
+.grade-select{
+  font-size:10px;border:1px solid var(--line);border-radius:5px;padding:2px 3px;
+  font-family:inherit;color:var(--ink-soft);background:var(--bg);width:100%;
+}
+.sat-badge{
+  font-size:9px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:#fff;
+  background:var(--accent);border-radius:4px;padding:1px 4px;flex-shrink:0;
+}
+.shift-badge{
+  font-size:9px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:#fff;
+  background:#7A4A6B;border-radius:4px;padding:1px 4px;flex-shrink:0;
+}
+
+.add-row-btn{
+  font-size:11.5px;color:var(--accent-deep);background:none;border:1px dashed #B9CBD0;
+  border-radius:6px;padding:3px 9px;cursor:pointer;margin:4px 0 4px 4px;font-family:inherit;
+}
+.add-row-btn:hover{background:#EAF2F4;}
+
+/* ---------- Popover ---------- */
+.popover{
+  position:absolute;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:var(--shadow);z-index:50;padding:10px;
+  width:300px;max-height:70vh;overflow:auto;
+}
+.popover h4{margin:8px 0 5px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;}
+.popover h4:first-child{margin-top:0;}
+.pop-range-badge{
+  background:var(--accent);color:#fff;font-size:11px;font-weight:600;
+  padding:5px 8px;border-radius:6px;margin-bottom:8px;text-align:center;
+}
+.vac-list{margin-bottom:6px;}
+.vac-period-item{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:5px 8px;border:1px solid var(--line);border-radius:6px;
+  margin-bottom:5px;font-size:11.5px;background:var(--bg);
+}
+.pop-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;}
+.pop-item{
+  border:1px solid var(--line);border-radius:6px;cursor:pointer;padding:5px 2px;
+  text-align:center;font-size:10px;font-family:'IBM Plex Mono',monospace;font-weight:600;color:#fff;
+}
+.pop-item:hover{filter:brightness(1.08);transform:translateY(-1px);}
+.pop-abs{display:flex;flex-direction:column;gap:3px;}
+.pop-abs-item{
+  display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:6px;
+  padding:5px 8px;cursor:pointer;font-size:11.5px;
+}
+.pop-abs-item:hover{background:var(--line-soft);}
+.pop-abs-item .dot{width:9px;height:9px;border-radius:3px;flex-shrink:0;}
+.pop-clear{width:100%;margin-top:8px;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:pointer;font-size:11.5px;color:var(--ink-soft);font-family:inherit;}
+.pop-clear:hover{background:var(--line-soft);}
+.pop-close{position:absolute;top:8px;right:8px;border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px;}
+
+/* ---------- Legend Drawer ---------- */
+.legend-drawer{
+  position:fixed;top:0;right:-380px;width:380px;height:100%;background:var(--surface);
+  box-shadow:-6px 0 24px rgba(18,33,58,0.12);z-index:100;transition:right .22s ease;
+  display:flex;flex-direction:column;
+}
+.legend-drawer.open{right:0;}
+#summaryDrawer{width:460px;right:-460px;}
+#summaryDrawer.open{right:0;}
+.legend-head{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;}
+.legend-head h3{margin:0;font-family:'Space Grotesk',sans-serif;font-size:16px;}
+.legend-body{padding:12px 18px;overflow:auto;flex:1;}
+.legend-section{margin-bottom:18px;}
+.legend-section h5{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px;}
+.legend-table{width:100%;border-collapse:collapse;font-size:12px;}
+.legend-table td{padding:4px 6px;border-bottom:1px solid var(--line-soft);vertical-align:middle;}
+.legend-swatch{width:30px;height:20px;border-radius:5px;color:#fff;font-family:'IBM Plex Mono',monospace;
+  font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;}
+.overlay{position:fixed;inset:0;background:rgba(18,33,58,0.28);z-index:90;display:none;}
+.overlay.show{display:block;}
+
+.summary-table{width:100%;border-collapse:collapse;font-size:11.5px;}
+.summary-table th{
+  text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em;
+  color:var(--muted);padding:5px 6px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);
+}
+.summary-table td{padding:5px 6px;border-bottom:1px solid var(--line-soft);}
+.summary-table tr:hover td{background:var(--line-soft);}
+.summary-table .num{text-align:center;font-family:'IBM Plex Mono',monospace;}
+.summary-hub-title{font-weight:600;color:var(--accent-deep);font-size:11px;margin:14px 0 4px;}
+.summary-hub-title:first-child{margin-top:0;}
+
+/* ---------- Empty state ---------- */
+.empty{padding:60px 30px;text-align:center;color:var(--muted);}
+.empty h3{font-family:'Space Grotesk',sans-serif;color:var(--ink);font-size:18px;margin-bottom:6px;}
+
+/* ---------- Print ---------- */
+@media print{
+  .topbar, .add-row-btn, .row-actions, .legend-drawer, .overlay{display:none !important;}
+  body{overflow:visible;}
+  .grid-wrap{overflow:visible;}
+  table.plan{font-size:9px;}
+  .col-area,.col-grade,.col-name,thead th{position:static;}
+}
+
+.footer-hint{
+  padding:6px 18px;font-size:11px;color:var(--muted);border-top:1px solid var(--line);
+  background:var(--surface);flex-shrink:0;display:flex;justify-content:space-between;
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="mark">VO</div>
+    <div class="txt">Turnistica<small>VetroOps · Pianificazione mensile</small></div>
+  </div>
+
+  <div class="month-nav">
+    <button id="prevMonth" title="Mese precedente">‹</button>
+    <div class="label" id="monthLabel">Luglio 2026</div>
+    <button id="nextMonth" title="Mese successivo">›</button>
+  </div>
+
+  <button class="btn" id="btnDuplicate">⧉ Duplica struttura mese prec.</button>
+  <button class="btn" id="btnAddArea">+ Area</button>
+  <button class="btn ghost" id="btnRoleToggle" title="Cambia livello di accesso">🔓 Amministratore</button>
+  <button class="btn ghost" id="btnChangePin" title="Cambia il PIN dell'Amministratore">🔑 PIN</button>
+
+  <div class="spacer"></div>
+
+  <div class="search-box"><input id="searchInput" placeholder="Cerca tecnico o hub…"></div>
+  <button class="btn ghost" id="btnLegend">Legenda</button>
+  <button class="btn ghost" id="btnSummary">Riepilogo</button>
+  <button class="btn ghost" id="btnPrint">Stampa</button>
+  <button class="btn ghost" id="btnConnectFile" title="Collega un file locale: da questo momento ogni modifica viene salvata automaticamente lì">🔗 Autosave su file</button>
+  <button class="btn ghost" id="btnBackup" title="Scarica un backup completo in .json">⬇ Backup</button>
+  <button class="btn ghost" id="btnRestore" title="Ripristina da un backup .json">⬆ Ripristina</button>
+  <input type="file" id="restoreInput" accept="application/json" style="display:none">
+  <label class="btn ghost" style="cursor:pointer;gap:6px;" title="Scarica automaticamente un backup .json ogni 5 minuti se ci sono modifiche">
+    <input type="checkbox" id="autoBackupToggle" style="margin:0;">
+    Backup auto. ogni 5'
+  </label>
+  <button class="btn primary" id="btnExport">⬇ Esporta Excel</button>
+  <button class="btn ghost" id="btnPdfPerPerson" title="Genera un PDF leggibile da telefono con i turni del mese, per ogni persona">📄 PDF turni</button>
+</div>
+
+<div class="workspace">
+  <div class="grid-wrap" id="gridWrap"></div>
+</div>
+
+<div class="footer-hint">
+  <span>Clic su una cella per assegnare turno/assenza · clic su un nome per rinominare · <span id="autosaveStatus" style="color:var(--muted)">salvataggio automatico solo nel browser — collega un file per un salvataggio più sicuro</span></span>
+  <span id="statTotals"></span>
+</div>
+
+<div class="legend-drawer" id="summaryDrawer">
+  <div class="legend-head">
+    <h3>Riepilogo mensile</h3>
+    <button class="btn ghost" id="btnCloseSummary">✕</button>
+  </div>
+  <div class="legend-body" id="summaryBody"></div>
+</div>
+
+<div class="overlay" id="overlay"></div>
+<div class="legend-drawer" id="legendDrawer">
+  <div class="legend-head">
+    <h3>Legenda orari &amp; codici</h3>
+    <button class="btn ghost" id="btnCloseLegend">✕</button>
+  </div>
+  <div class="legend-body" id="legendBody"></div>
+</div>
+
+<script>
+/* =========================================================
+   CONFIG — codici turno, sabato ridotto, assenze
+   ========================================================= */
+const SHIFT_CODES = {
+  A:{e1:"7:00",u1:"12:00",e2:"14:00",u2:"17:00"},
+  B:{e1:"8:00",u1:"13:00",e2:"14:00",u2:"18:00"},
+  C:{e1:"8:00",u1:"12:30",e2:"14:00",u2:"17:30"},
+  D:{e1:"8:00",u1:"12:30",e2:"14:30",u2:"18:00"},
+  E:{e1:"8:30",u1:"12:30",e2:"14:00",u2:"18:00"},
+  F:{e1:"8:30",u1:"12:30",e2:"14:30",u2:"18:30"},
+  G:{e1:"8:30",u1:"12:00",e2:"14:00",u2:"18:30"},
+  H:{e1:"8:30",u1:"12:30",e2:"14:00",u2:"17:00"},
+  I:{e1:"8:30",u1:"12:30",e2:"14:00",u2:"17:30"},
+  L:{e1:"9:00",u1:"12:30",e2:"14:00",u2:"18:30"},
+  M:{e1:"9:00",u1:"13:00",e2:"14:30",u2:"18:30"},
+  N:{e1:"9:00",u1:"13:00",e2:"14:00",u2:"18:00"},
+  O:{e1:"9:00",u1:"13:00",e2:"15:00",u2:"19:00"},
+  P:{e1:"9:30",u1:"12:30",e2:"14:00",u2:"19:00"},
+  Q:{e1:"9:30",u1:"13:00",e2:"14:00",u2:"18:30"},
+  R:{e1:"8:30",u1:"12:00",e2:"14:30",u2:"18:00"},
+  S:{e1:"8:30",u1:"12:30",e2:"15:00",u2:"18:00"},
+};
+const SAT_CODES = {
+  AA:{e1:"8:30",u1:"12:30",e2:"—",u2:"—",h:"4h"},
+  BB:{e1:"8:00",u1:"12:00",e2:"—",u2:"—",h:"4h"},
+  CC:{e1:"8:30",u1:"12:30",e2:"14:00",u2:"16:00",h:"6h"},
+  DD:{e1:"8:30",u1:"16:00",e2:"—",u2:"—",h:"6h"},
+  EE:{e1:"8:30",u1:"12:30",e2:"14:00",u2:"18:00",h:"8h"},
+  FF:{e1:"—",u1:"—",e2:"15:00",u2:"18:00",h:"3h"},
+};
+const ABSENCE_CODES = {
+  FE:{label:"Ferie",color:"#D98E3C"},
+  RS4M:{label:"Riposo sett. + ferie 4h mattina",color:"#8E9AAE"},
+  RS4P:{label:"Riposo sett. + ferie 4h pomeriggio",color:"#7C899E"},
+  RS8:{label:"Riposo settimanale 8h",color:"#6B7280"},
+  VM:{label:"Visita medica",color:"#C9A227"},
+  "104":{label:"Permesso L.104",color:"#2F9E8F"},
+  FESTIVITA:{label:"Festività",color:"#8B6FD1"},
+  CP:{label:"Congedo parentale",color:"#D97BA0"},
+  MA:{label:"Malattia",color:"#D8556B"},
+  MT:{label:"Matrimonio",color:"#E3A0C4"},
+  INF:{label:"Infortunio",color:"#A6303F"},
+  FO:{label:"Formazione",color:"#4C9A5B"},
+  TR:{label:"Trasferta (n. CDA)",color:"#5C6BC0"},
+};
+const GRADES = ["CMM","PL","SKILLED","SENIOR","EXPERT","TRAINEE","ALTRO"];
+const HUB_PALETTE = [
+  "#3D5A80", // blu ardesia
+  "#7A4A6B", // malva
+  "#2E7D6B", // verde smeraldo scuro
+  "#8C5B3C", // terracotta
+  "#4A5C8C", // indaco
+  "#8C6B2F", // ocra
+  "#3C6E71", // petrolio
+  "#6B4C93", // viola
+  "#5C7A3C", // oliva
+  "#8C3C5B", // bordeaux
+];
+function hexToRgba(hex, alpha){
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+const DOW_IT = ["dom","lun","mar","mer","gio","ven","sab"];
+const MONTHS_IT = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
+
+function shiftColor(){ return "#3E7CB1"; }
+function satColor(){ return "#2AA9BF"; }
+
+/* =========================================================
+   STATE
+   ========================================================= */
+const STORAGE_KEY = "vetroops_turnistica_v1";
+const ROLE_KEY = "vetroops_role";
+const PIN_KEY = "vetroops_admin_pin";
+const DEFAULT_PIN = "1234";
+
+function getPin(){ return localStorage.getItem(PIN_KEY) || DEFAULT_PIN; }
+function setPin(newPin){ localStorage.setItem(PIN_KEY, newPin); }
+let currentRole = localStorage.getItem(ROLE_KEY) || "operator";
+function isAdmin(){ return currentRole === "admin"; }
+let DB = loadDB();
+let current = DB.lastOpen || defaultKey();
+let searchTerm = "";
+
+function defaultKey(){
+  const now = new Date();
+  return now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0");
+}
+function loadDB(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(!parsed.vacationPlans) parsed.vacationPlans = {};
+      return parsed;
+    }
+  }catch(e){}
+  return {months:{}, lastOpen:null, vacationPlans:{}};
+}
+function saveDB(){
+  DB.lastOpen = current;
+  if(!DB.vacationPlans) DB.vacationPlans = {};
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
+  scheduleAutosaveWrite();
+  autoBackupDirty = true;
+}
+function uid(){ return Math.random().toString(36).slice(2,9); }
+
+function daysInMonth(key){
+  const [y,m] = key.split("-").map(Number);
+  return new Date(y,m,0).getDate();
+}
+function saturdayOnOrBefore(date){
+  const day = date.getDay(); // 0=dom ... 6=sab
+  const diff = (day - 6 + 7) % 7;
+  const res = new Date(date);
+  res.setDate(res.getDate() - diff);
+  return res;
+}
+function weekNumberForDate(y, m, d){
+  const date = new Date(y, m-1, d);
+  const week1Start = saturdayOnOrBefore(new Date(y, 0, 1));
+  const diffDays = Math.round((date - week1Start) / 86400000);
+  return Math.floor(diffDays/7) + 1;
+}
+function monthLabel(key){
+  const [y,m] = key.split("-").map(Number);
+  return MONTHS_IT[m-1] + " " + y;
+}
+function shiftKey(key, delta){
+  let [y,m] = key.split("-").map(Number);
+  m += delta;
+  if(m<1){m=12;y--;} if(m>12){m=1;y++;}
+  return y+"-"+String(m).padStart(2,"0");
+}
+function prevExistingKey(key){
+  const keys = Object.keys(DB.months).filter(k=>k<key).sort();
+  return keys.length ? keys[keys.length-1] : null;
+}
+
+function starterAreas(){
+  return [{
+    id:uid(), name:"AREA 1", manager:"Nome Cognome", managerId:uid(), managerDays:{},
+    planners:[{id:uid(), name:"Nome Cognome", role:"PL", days:{}}],
+    hubs:[{
+      id:uid(), code:"001", name:"NOME HUB", type:"SM",
+      employees:[{id:uid(), name:"Nome Cognome", grade:"SKILLED", days:{}}]
+    }]
+  }];
+}
+function ensureManagerId(area){
+  if(!area.managerId){ area.managerId = uid(); }
+  if(!area.managerDays){ area.managerDays = {}; }
+  return area.managerId;
+}
+function ensurePlannerDays(planner){
+  if(!planner.days) planner.days = {};
+  return planner.days;
+}
+
+function getMonth(key){
+  if(!DB.months[key]){
+    const prevKey = prevExistingKey(key);
+    if(prevKey){
+      const cloned = JSON.parse(JSON.stringify(DB.months[prevKey]));
+      cloned.areas.forEach(a=>{
+        a.hubs.forEach(h=> h.employees.forEach(e=> e.days = {}));
+      });
+      DB.months[key] = cloned;
+    } else {
+      DB.months[key] = {areas: starterAreas()};
+    }
+    saveDB();
+  }
+  return DB.months[key];
+}
+
+/* =========================================================
+   RENDER
+   ========================================================= */
+const gridWrap = document.getElementById("gridWrap");
+const monthLabelEl = document.getElementById("monthLabel");
+
+function render(){
+  monthLabelEl.textContent = monthLabel(current);
+  const data = getMonth(current);
+  const nDays = daysInMonth(current);
+  const [y,m] = current.split("-").map(Number);
+
+  let dayCols = "";
+  for(let d=1; d<=nDays; d++){
+    const dow = new Date(y,m-1,d).getDay();
+    const weekend = (dow===0||dow===6);
+    const sunday = dow===0;
+    dayCols += `<th class="head-day ${weekend?"weekend":""} ${sunday?"sunday":""}"><span class="dow">${DOW_IT[dow]}</span><span class="num">${d}</span></th>`;
+  }
+
+  // Raggruppa i giorni in settimane sabato→venerdì, numerate dall'inizio dell'anno
+  const weekBlocks = computeWeekBlocks(y, m, nDays);
+  let weekCells = "";
+  weekBlocks.forEach(block=>{
+    const weekNum = weekNumberForDate(y, m, block.start);
+    weekCells += `<th colspan="${block.end - block.start + 1}" class="week-cell">Sett. ${weekNum}</th>`;
+  });
+
+  let thead = `<thead>
+    <tr class="week-row"><th class="col-area"></th><th class="col-grade"></th><th class="col-name"></th>${weekCells}</tr>
+    <tr class="title-row"><th class="col-area"></th><th class="col-grade"></th><th class="col-name">Nominativo</th>${dayCols}</tr>
+  </thead>`;
+
+  if(!data.areas.length){
+    gridWrap.innerHTML = `<table class="plan">${thead}<tbody>
+      <tr><td class="col-area"></td><td class="col-grade"></td><td class="col-name" style="padding:26px 16px;">
+        <div style="max-width:280px;">
+          <strong style="font-family:'Space Grotesk',sans-serif;font-size:14px;">Nessuna area pianificata</strong>
+          <p style="color:var(--muted);font-size:12.5px;margin:6px 0 0;">Aggiungi la prima area per iniziare la pianificazione di ${monthLabel(current)}.</p>
+        </div>
+      </td><td colspan="${nDays}"></td></tr>
+    </tbody></table>`;
+    updateStats(data);
+    return;
+  }
+
+  let rows = "";
+  const term = searchTerm.trim().toLowerCase();
+  let hubColorIdx = 0;
+
+  data.areas.forEach(area=>{
+    rows += `<tr class="row-area-header" data-area="${area.id}">
+      <td class="col-area"></td>
+      <td class="col-grade"></td>
+      <td class="col-name spanner" colspan="1">
+        <div class="name-cell">
+          <span class="editable" contenteditable data-path="area.name" data-area="${area.id}">${area.name}</span>
+          ${isAdmin()?`<span class="row-actions"><button class="icon-btn" data-action="del-area" data-area="${area.id}">✕</button></span>`:""}
+        </div>
+      </td>
+      <td class="spanner" colspan="${nDays}"></td>
+    </tr>`;
+
+    ensureManagerId(area);
+    let managerDayTds = "";
+    for(let d=1; d<=nDays; d++){
+      const dow = new Date(y,m-1,d).getDay();
+      const weekend = (dow===0||dow===6);
+      const sunday = dow===0;
+      const val = getManagerEffectiveCode(area, y, m, d);
+      const isManual = !!area.managerDays[d];
+      managerDayTds += `<td class="cell-day ${weekend?"weekend":""} ${sunday?"sunday":""} ${isManual?"":"auto"}" data-action="cell" data-kind="manager" data-area="${area.id}" data-day="${d}">${chipFor(val)}</td>`;
+    }
+    rows += `<tr class="row-manager">
+      <td class="col-area"></td>
+      <td class="col-grade"><span class="tag cmm">CMM</span></td>
+      <td class="col-name">
+        <div class="name-cell">
+          <span class="editable" contenteditable data-path="area.manager" data-area="${area.id}">${area.manager||"—"}</span>
+          ${isAdmin()?`<button class="icon-btn" data-action="vacation-plan" data-emp="${area.managerId}" title="Piano ferie">🌴</button>`:""}
+        </div>
+      </td>
+      ${managerDayTds}
+    </tr>`;
+
+    area.planners.forEach((p, plannerIdx)=>{
+      ensurePlannerDays(p);
+      let plannerSatCount = 0;
+      let plannerDayTds = "";
+      for(let d=1; d<=nDays; d++){
+        const dow = new Date(y,m-1,d).getDay();
+        const weekend = (dow===0||dow===6);
+        const sunday = dow===0;
+        const val = getPlannerEffectiveCode(p, plannerIdx, y, m, d, weekBlocks);
+        const isManual = !!p.days[d];
+        if(dow===6 && isWorkedCode(val)) plannerSatCount++;
+        plannerDayTds += `<td class="cell-day ${weekend?"weekend":""} ${sunday?"sunday":""} ${isManual?"":"auto"}" data-action="cell" data-kind="planner" data-area="${area.id}" data-target="${p.id}" data-day="${d}">${chipFor(val)}</td>`;
+      }
+      rows += `<tr class="row-manager">
+        <td class="col-area"></td>
+        <td class="col-grade"><span class="tag pl">PL</span></td>
+        <td class="col-name">
+          <div class="name-cell">
+            <span class="editable" contenteditable data-path="planner.name" data-area="${area.id}" data-planner="${p.id}">${p.name}</span>
+            ${plannerSatCount>0?`<span class="sat-badge" title="Sabati lavorati questo mese">${plannerSatCount}S</span>`:""}
+            ${p.baseShiftCode?`<span class="shift-badge" title="Turno base personalizzato: ${p.baseShiftCode}">${p.baseShiftCode}</span>`:""}
+            ${isAdmin()?`<button class="icon-btn" data-action="vacation-plan" data-emp="${p.id}" title="Piano ferie">🌴</button>`:""}
+            ${isAdmin()?`<button class="icon-btn" data-action="base-shift" data-emp="${p.id}" title="Turno base personalizzato">⏱</button>`:""}
+            ${isAdmin()?`<span class="row-actions"><button class="icon-btn" data-action="del-planner" data-area="${area.id}" data-planner="${p.id}">✕</button></span>`:""}
+          </div>
+        </td>
+        ${plannerDayTds}
+      </tr>`;
+    });
+    if(isAdmin()){
+      rows += `<tr><td class="col-area"></td><td class="col-grade"></td><td class="col-name">
+        <button class="add-row-btn" data-action="add-planner" data-area="${area.id}">+ planner</button></td>
+        <td colspan="${nDays}"></td></tr>`;
+    }
+
+    area.hubs.forEach(hub=>{
+      const hubMatch = !term || hub.name.toLowerCase().includes(term) || (hub.code||"").includes(term);
+      const empMatches = hub.employees.filter(e=>!term || e.name.toLowerCase().includes(term));
+      if(term && !hubMatch && empMatches.length===0) return;
+
+      const hubColor = HUB_PALETTE[hubColorIdx % HUB_PALETTE.length];
+      const hubColorLight = hexToRgba(hubColor, 0.12);
+      hubColorIdx++;
+
+      rows += `<tr class="row-hub" style="--hub-color:${hubColor};--hub-color-light:${hubColorLight}">
+        <td class="col-area"></td><td class="col-grade"></td>
+        <td class="col-name">
+          <div class="name-cell">
+            <span class="editable" contenteditable data-path="hub.code" data-hub="${hub.id}">${hub.code}</span>
+            &nbsp;<span class="editable" contenteditable data-path="hub.name" data-hub="${hub.id}">${hub.name}</span>
+            ${isAdmin()?`<span class="row-actions"><button class="icon-btn" data-action="del-hub" data-area="${area.id}" data-hub="${hub.id}">✕</button></span>`:""}
+          </div>
+        </td>
+        ${blankDays(nDays, y, m)}
+      </tr>`;
+
+      const list = term ? empMatches : hub.employees;
+      list.forEach(emp=>{
+        const empIdx = hub.employees.indexOf(emp);
+        let dayTds = "";
+        let satCount = 0;
+        for(let d=1; d<=nDays; d++){
+          const dow = new Date(y,m-1,d).getDay();
+          const weekend = (dow===0||dow===6);
+          const sunday = dow===0;
+          const val = getEffectiveCode(emp, empIdx, y, m, d, weekBlocks);
+          const isManual = !!emp.days[d];
+          if(dow===6 && isWorkedCode(val)) satCount++;
+          dayTds += `<td class="cell-day ${weekend?"weekend":""} ${sunday?"sunday":""} ${isManual?"":"auto"}" data-action="cell" data-hub="${hub.id}" data-emp="${emp.id}" data-day="${d}">${chipFor(val)}</td>`;
+        }
+        rows += `<tr class="row-emp">
+          <td class="col-area"></td>
+          <td class="col-grade">${gradeSelect(emp, hub.id)}</td>
+          <td class="col-name">
+            <div class="name-cell">
+              <span class="editable" contenteditable data-path="emp.name" data-hub="${hub.id}" data-emp="${emp.id}">${emp.name}</span>
+              ${satCount>0?`<span class="sat-badge" title="Sabati lavorati questo mese">${satCount}S</span>`:""}
+              ${emp.baseShiftCode?`<span class="shift-badge" title="Turno base personalizzato: ${emp.baseShiftCode}">${emp.baseShiftCode}</span>`:""}
+              ${isAdmin()?`<button class="icon-btn" data-action="vacation-plan" data-hub="${hub.id}" data-emp="${emp.id}" title="Piano ferie">🌴</button>`:""}
+              ${isAdmin()?`<button class="icon-btn" data-action="base-shift" data-hub="${hub.id}" data-emp="${emp.id}" title="Turno base personalizzato">⏱</button>`:""}
+              ${isAdmin()?`<span class="row-actions"><button class="icon-btn" data-action="del-emp" data-hub="${hub.id}" data-emp="${emp.id}">✕</button></span>`:""}
+            </div>
+          </td>
+          ${dayTds}
+        </tr>`;
+      });
+      if(hub.employees.length>1 && !term){
+        rows += `<tr class="row-coverage">
+          <td class="col-area"></td><td class="col-grade"></td>
+          <td class="col-name">copertura hub</td>
+          ${coverageDays(hub, nDays, y, m)}
+        </tr>`;
+      }
+      if(isAdmin()){
+        rows += `<tr><td class="col-area"></td><td class="col-grade"></td><td class="col-name">
+          <button class="add-row-btn" data-action="add-emp" data-hub="${hub.id}">+ tecnico</button></td>
+          <td colspan="${nDays}"></td></tr>`;
+      }
+    });
+
+    if(isAdmin()){
+      rows += `<tr><td class="col-area"></td><td class="col-grade"></td><td class="col-name">
+        <button class="add-row-btn" data-action="add-hub" data-area="${area.id}">+ hub</button></td>
+        <td colspan="${nDays}"></td></tr>`;
+    }
+  });
+
+  gridWrap.innerHTML = `<table class="plan">${thead}<tbody>${rows}</tbody></table>`;
+  updateStats(data);
+}
+
+function blankDays(n, y, m){
+  let s = "";
+  for(let d=1; d<=n; d++){
+    if(y && m){
+      const dow = new Date(y,m-1,d).getDay();
+      const weekend = (dow===0||dow===6);
+      const sunday = dow===0;
+      s += `<td class="cell-day ${weekend?"weekend":""} ${sunday?"sunday":""}"></td>`;
+    } else {
+      s += `<td class="cell-day"></td>`;
+    }
+  }
+  return s;
+}
+
+function gradeSelect(emp, hubId){
+  const opts = GRADES.map(g=>`<option value="${g}" ${emp.grade===g?"selected":""}>${g}</option>`).join("");
+  return `<select class="grade-select" data-action="grade" data-hub="${hubId}" data-emp="${emp.id}">${opts}</select>`;
+}
+
+function isWorkedCode(code){
+  return !!code && (!!SHIFT_CODES[code] || !!SAT_CODES[code]);
+}
+function isAbsenceCode(code){
+  if(!code) return false;
+  if(code.startsWith("TR")) return true;
+  return !!ABSENCE_CODES[code];
+}
+
+/* =========================================================
+   PIANO FERIE (per tecnico, valido su tutto l'anno)
+   ========================================================= */
+function ensureVacationPlans(){ if(!DB.vacationPlans) DB.vacationPlans = {}; }
+function getVacationPeriods(empId){
+  ensureVacationPlans();
+  return DB.vacationPlans[empId] || [];
+}
+function addVacationPeriod(empId, start, end){
+  ensureVacationPlans();
+  if(!DB.vacationPlans[empId]) DB.vacationPlans[empId] = [];
+  DB.vacationPlans[empId].push({id:uid(), start, end});
+  saveDB();
+}
+function removeVacationPeriod(empId, periodId){
+  ensureVacationPlans();
+  if(DB.vacationPlans[empId]) DB.vacationPlans[empId] = DB.vacationPlans[empId].filter(p=>p.id!==periodId);
+  saveDB();
+}
+function isoDate(y,m,d){ return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`; }
+function isDateInVacation(empId, y, m, d){
+  const periods = getVacationPeriods(empId);
+  if(!periods.length) return false;
+  const dateStr = isoDate(y,m,d);
+  return periods.some(p=> dateStr >= p.start && dateStr <= p.end);
+}
+function formatItDate(iso){
+  const [yy,mm,dd] = iso.split("-");
+  return `${dd}/${mm}/${yy}`;
+}
+
+/* =========================================================
+   TURNO DI DEFAULT CALCOLATO AUTOMATICAMENTE (live, non salvato)
+   Lun-Gio: E (8h) — Ven: E, o AA se quel sabato si lavora — Sab: AA/RS8 alternati — Dom: RS8
+   ========================================================= */
+function computeWeekBlocks(y, m, nDays){
+  let blocks = [];
+  let startDay = 1;
+  for(let d=1; d<=nDays; d++){
+    const dow = new Date(y,m-1,d).getDay();
+    if(d>1 && dow===6){ blocks.push({start:startDay, end:d-1}); startDay = d; }
+  }
+  blocks.push({start:startDay, end:nDays});
+  return blocks;
+}
+function blockForDay(blocks, d){
+  return blocks.find(b=> d>=b.start && d<=b.end);
+}
+function computeDefaultCode(empIdx, y, m, d, blocks, baseCode, fridayCompCode){
+  baseCode = baseCode || "E";
+  fridayCompCode = fridayCompCode || "AA";
+  const dow = new Date(y,m-1,d).getDay();
+
+  function worksSaturdayFor(satDay){
+    // satDay può eccedere i giorni del mese (es. 32): JS Date lo gestisce correttamente
+    const weekNum = weekNumberForDate(y, m, satDay);
+    return (weekNum % 2) === (empIdx % 2);
+  }
+
+  if(dow===6) return worksSaturdayFor(d) ? "AA" : "RS8";
+  if(dow===0) return "RS8";
+  if(dow===5){
+    // Il sabato di riferimento per un venerdì è quello immediatamente successivo (giorno dopo),
+    // non quello che apre il blocco settimanale sabato→venerdì di appartenenza del venerdì stesso.
+    return worksSaturdayFor(d+1) ? fridayCompCode : baseCode;
+  }
+  return baseCode;
+}
+function getEffectiveCode(emp, empIdx, y, m, d, blocks){
+  if(emp.days[d]) return emp.days[d]; // modifica manuale: priorità massima
+  if(isDateInVacation(emp.id, y, m, d)) return "FE"; // piano ferie
+  return computeDefaultCode(empIdx, y, m, d, blocks, emp.baseShiftCode, emp.fridayCompCode); // turno standard (o personalizzato) calcolato al volo
+}
+
+// Cluster Manager: solo piano ferie, sempre lun-ven (mai sabato/rotazione)
+function computeManagerDefaultCode(y, m, d){
+  const dow = new Date(y,m-1,d).getDay();
+  if(dow===0 || dow===6) return "RS8";
+  return "E";
+}
+function getManagerEffectiveCode(area, y, m, d){
+  ensureManagerId(area);
+  if(area.managerDays[d]) return area.managerDays[d];
+  if(isDateInVacation(area.managerId, y, m, d)) return "FE";
+  return computeManagerDefaultCode(y, m, d);
+}
+
+// Planner: stessa logica dei tecnici (turno standard + sabati alternati + ferie)
+function getPlannerEffectiveCode(planner, plannerIdx, y, m, d, blocks){
+  ensurePlannerDays(planner);
+  if(planner.days[d]) return planner.days[d];
+  if(isDateInVacation(planner.id, y, m, d)) return "FE";
+  return computeDefaultCode(plannerIdx, y, m, d, blocks, planner.baseShiftCode, planner.fridayCompCode);
+}
+
+function coverageDays(hub, nDays, y, m){
+  const blocks = computeWeekBlocks(y, m, nDays);
+  let tds = "";
+  for(let d=1; d<=nDays; d++){
+    const dow = new Date(y,m-1,d).getDay();
+    const weekend = (dow===0||dow===6);
+    const sunday = dow===0;
+    let present=0, absent=0, unplanned=0;
+    hub.employees.forEach((e, idx)=>{
+      const v = getEffectiveCode(e, idx, y, m, d, blocks);
+      if(isWorkedCode(v)) present++;
+      else if(isAbsenceCode(v)) absent++;
+      else unplanned++;
+    });
+    const total = hub.employees.length;
+    let cls = "cov-full";
+    if(present===0 && total>0) cls = "cov-zero";
+    else if(absent>0 || unplanned>0) cls = "cov-partial";
+    tds += `<td class="cell-day ${weekend?"weekend":""} ${sunday?"sunday":""}"><span class="cov-badge ${cls}">${present}/${total}</span></td>`;
+  }
+  return tds;
+}
+
+function hexNoHash(hex){ return hex.replace("#","").toUpperCase(); }
+function fillColorForCode(code){
+  if(!code) return null;
+  if(code.startsWith("TR")) return hexNoHash(ABSENCE_CODES.TR.color);
+  if(SHIFT_CODES[code]) return hexNoHash(shiftColor());
+  if(SAT_CODES[code]) return hexNoHash(satColor());
+  if(ABSENCE_CODES[code]) return hexNoHash(ABSENCE_CODES[code].color);
+  return null;
+}
+function hexToRgbArr(hex){
+  hex = hex.replace("#","");
+  return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+}
+function timeRangeLabel(c){
+  const parts = [];
+  if(c.e1 !== "—") parts.push(`${c.e1}–${c.u1}`);
+  if(c.e2 !== "—") parts.push(`${c.e2}–${c.u2}`);
+  return parts.join(" / ");
+}
+function codeTimeLabel(code){
+  if(!code) return "";
+  if(code.startsWith("TR")) return "Trasferta (CDA "+code.slice(2)+")";
+  if(SHIFT_CODES[code]){ const c=SHIFT_CODES[code]; return `${c.e1}–${c.u1} / ${c.e2}–${c.u2}`; }
+  if(SAT_CODES[code]){ const c=SAT_CODES[code]; return `${timeRangeLabel(c)} (${c.h})`; }
+  if(ABSENCE_CODES[code]) return ABSENCE_CODES[code].label;
+  return code;
+}
+
+function chipFor(code){
+  if(!code) return "";
+  let color = "#9AA5B4";
+  let label = code;
+  if(SHIFT_CODES[code]){ color = shiftColor(); }
+  else if(SAT_CODES[code]){ color = satColor(); }
+  else if(code.startsWith("TR")){ color = ABSENCE_CODES.TR.color; label="TR"; }
+  else if(ABSENCE_CODES[code]){ color = ABSENCE_CODES[code].color; }
+  return `<span class="chip" style="background:${color}">${label}</span>`;
+}
+
+function updateStats(data){
+  let areas = data.areas.length, hubs=0, emps=0;
+  data.areas.forEach(a=>{ hubs += a.hubs.length; a.hubs.forEach(h=> emps += h.employees.length); });
+  document.getElementById("statTotals").textContent = `${areas} aree · ${hubs} hub · ${emps} tecnici`;
+}
+
+/* =========================================================
+   HELPERS: find refs
+   ========================================================= */
+function findArea(id){ return getMonth(current).areas.find(a=>a.id===id); }
+function findHub(id){
+  for(const a of getMonth(current).areas){
+    const h = a.hubs.find(x=>x.id===id);
+    if(h) return {hub:h, area:a};
+  }
+  return null;
+}
+function findEmp(hubId, empId){
+  const found = findHub(hubId);
+  if(!found) return null;
+  const emp = found.hub.employees.find(e=>e.id===empId);
+  return emp ? {emp, hub:found.hub, area:found.area} : null;
+}
+function findPlannerByIdOnly(plannerId){
+  for(const a of getMonth(current).areas){
+    const p = a.planners.find(pl=>pl.id===plannerId);
+    if(p) return {area:a, planner:p};
+  }
+  return null;
+}
+
+/* =========================================================
+   EVENTS
+   ========================================================= */
+document.getElementById("prevMonth").onclick = ()=>{ current = shiftKey(current,-1); saveDB(); render(); };
+document.getElementById("nextMonth").onclick = ()=>{ current = shiftKey(current,1); saveDB(); render(); };
+
+document.getElementById("btnAddArea").onclick = ()=>{
+  if(!isAdmin()){ alert("Solo l'Amministratore può aggiungere aree. Passa al livello Amministratore per continuare."); return; }
+  const data = getMonth(current);
+  data.areas.push({id:uid(), name:"NUOVA AREA", manager:"Nome Cognome", managerId:uid(), managerDays:{}, planners:[], hubs:[]});
+  saveDB(); render();
+};
+
+document.getElementById("btnDuplicate").onclick = ()=>{
+  if(!isAdmin()){ alert("Solo l'Amministratore può duplicare la struttura. Passa al livello Amministratore per continuare."); return; }
+  const prevKey = prevExistingKey(current) || shiftKey(current,-1);
+  if(!DB.months[prevKey]){ alert("Nessun mese precedente trovato da duplicare."); return; }
+  const cloned = JSON.parse(JSON.stringify(DB.months[prevKey]));
+  cloned.areas.forEach(a=> a.hubs.forEach(h=> h.employees.forEach(e=> e.days={})));
+  DB.months[current] = cloned;
+  saveDB(); render();
+};
+
+/* =========================================================
+   Turno di default calcolato automaticamente al volo (vedi
+   getEffectiveCode / computeDefaultCode più in basso): non serve
+   più un pulsante "genera", il calendario si aggiorna da solo.
+   ========================================================= */
+
+document.getElementById("searchInput").addEventListener("input", e=>{
+  searchTerm = e.target.value; render();
+});
+
+gridWrap.addEventListener("click", e=>{
+  const t = e.target.closest("[data-action]");
+  if(!t) return;
+  const action = t.dataset.action;
+  const structuralActions = ["del-area","add-planner","del-planner","add-hub","del-hub","add-emp","del-emp","vacation-plan","base-shift"];
+  if(structuralActions.includes(action) && !isAdmin()){
+    alert("Questa azione è riservata al livello Amministratore. Passa al livello Amministratore per aggiungere o eliminare aree, hub, tecnici, planner o piani ferie.");
+    return;
+  }
+
+  if(action==="del-area"){
+    if(!confirm("Eliminare l'intera area e tutti i suoi hub/tecnici?")) return;
+    const data = getMonth(current);
+    data.areas = data.areas.filter(a=>a.id!==t.dataset.area);
+    saveDB(); render();
+  }
+  else if(action==="add-planner"){
+    const area = findArea(t.dataset.area);
+    area.planners.push({id:uid(), name:"Nome Cognome", role:"PL", days:{}});
+    saveDB(); render();
+  }
+  else if(action==="del-planner"){
+    const area = findArea(t.dataset.area);
+    area.planners = area.planners.filter(p=>p.id!==t.dataset.planner);
+    saveDB(); render();
+  }
+  else if(action==="add-hub"){
+    const area = findArea(t.dataset.area);
+    area.hubs.push({id:uid(), code:String(area.hubs.length+1).padStart(3,"0"), name:"NUOVO HUB", type:"SM", employees:[]});
+    saveDB(); render();
+  }
+  else if(action==="del-hub"){
+    if(!confirm("Eliminare l'hub e tutti i tecnici collegati?")) return;
+    const area = findArea(t.dataset.area);
+    area.hubs = area.hubs.filter(h=>h.id!==t.dataset.hub);
+    saveDB(); render();
+  }
+  else if(action==="add-emp"){
+    const found = findHub(t.dataset.hub);
+    found.hub.employees.push({id:uid(), name:"Nome Cognome", grade:"SKILLED", days:{}});
+    saveDB(); render();
+  }
+  else if(action==="del-emp"){
+    const found = findHub(t.dataset.hub);
+    found.hub.employees = found.hub.employees.filter(x=>x.id!==t.dataset.emp);
+    saveDB(); render();
+  }
+  else if(action==="vacation-plan"){
+    openVacationPopover(t, t.dataset.emp);
+  }
+  else if(action==="base-shift"){
+    openBaseShiftPopover(t, t.dataset.hub, t.dataset.emp);
+  }
+});
+
+gridWrap.addEventListener("change", e=>{
+  if(e.target.dataset.action==="grade"){
+    const found = findEmp(e.target.dataset.hub, e.target.dataset.emp) || findEmpByIdOnly(e.target.dataset.emp);
+    if(found) found.emp.grade = e.target.value;
+    saveDB();
+  }
+});
+function findEmpByIdOnly(empId){
+  for(const a of getMonth(current).areas){
+    for(const h of a.hubs){
+      const emp = h.employees.find(e=>e.id===empId);
+      if(emp) return {emp, hub:h, area:a};
+    }
+  }
+  return null;
+}
+
+gridWrap.addEventListener("blur", e=>{
+  const el = e.target;
+  if(!el.classList || !el.classList.contains("editable")) return;
+  const path = el.dataset.path;
+  const val = el.textContent.trim();
+  if(path==="area.name") findArea(el.dataset.area).name = val;
+  else if(path==="area.manager") findArea(el.dataset.area).manager = val;
+  else if(path==="planner.name"){
+    const area = findArea(el.dataset.area);
+    const p = area.planners.find(x=>x.id===el.dataset.planner);
+    if(p) p.name = val;
+  }
+  else if(path==="hub.name") findHub(el.dataset.hub).hub.name = val;
+  else if(path==="hub.code") findHub(el.dataset.hub).hub.code = val;
+  else if(path==="emp.name"){
+    const f = findEmp(el.dataset.hub, el.dataset.emp) || findEmpByIdOnly(el.dataset.emp);
+    if(f) f.emp.name = val;
+  }
+  saveDB();
+}, true);
+
+/* =========================================================
+   SELEZIONE INTERVALLO (click + shift-click, come Excel)
+   ========================================================= */
+let selRange = null; // {kind, hubId/areaId, empId/targetId, startDay, endDay} — intervallo del popover aperto
+let lastClickedCell = null; // ultima cella cliccata, per lo shift-click
+
+function cellSelector(range, d){
+  const kind = range.kind || "emp";
+  if(kind==="manager") return `td.cell-day[data-kind="manager"][data-area="${range.areaId}"][data-day="${d}"]`;
+  if(kind==="planner") return `td.cell-day[data-kind="planner"][data-area="${range.areaId}"][data-target="${range.targetId}"][data-day="${d}"]`;
+  return `td.cell-day[data-hub="${range.hubId}"][data-emp="${range.empId}"][data-day="${d}"]`;
+}
+function sameRowTarget(a, b){
+  const kind = a.kind || "emp";
+  if(kind !== (b.kind||"emp")) return false;
+  if(kind==="manager") return a.areaId===b.areaId;
+  if(kind==="planner") return a.areaId===b.areaId && a.targetId===b.targetId;
+  return a.hubId===b.hubId && a.empId===b.empId;
+}
+function clearSelectionHighlight(){
+  gridWrap.querySelectorAll("td.cell-day.selected").forEach(td=>td.classList.remove("selected"));
+}
+function highlightSelection(){
+  clearSelectionHighlight();
+  if(!selRange) return;
+  for(let d=selRange.startDay; d<=selRange.endDay; d++){
+    const td = gridWrap.querySelector(cellSelector(selRange, d));
+    if(td) td.classList.add("selected");
+  }
+}
+function clearSelection(){
+  clearSelectionHighlight();
+  selRange = null;
+}
+
+gridWrap.addEventListener("click", e=>{
+  const t = e.target.closest('td.cell-day[data-action="cell"]');
+  if(!t) return;
+  const kind = t.dataset.kind || "emp";
+  const day = parseInt(t.dataset.day,10);
+  const base = kind==="manager"
+    ? {kind, areaId:t.dataset.area}
+    : kind==="planner"
+      ? {kind, areaId:t.dataset.area, targetId:t.dataset.target}
+      : {kind:"emp", hubId:t.dataset.hub, empId:t.dataset.emp};
+  let range;
+  if(e.shiftKey && lastClickedCell && sameRowTarget(lastClickedCell, base)){
+    range = {...base, startDay: Math.min(lastClickedCell.day, day), endDay: Math.max(lastClickedCell.day, day)};
+  } else {
+    range = {...base, startDay: day, endDay: day};
+  }
+  lastClickedCell = {...base, day};
+  selRange = range;
+  openCellPopover(t, range);
+});
+
+/* =========================================================
+   CELL POPOVER
+   ========================================================= */
+let activePopover = null;
+let popoverAnchor = null;
+function closePopover(){
+  if(activePopover){ activePopover.remove(); activePopover=null; }
+  popoverAnchor = null;
+  clearSelection();
+}
+document.addEventListener("click", e=>{
+  if(activePopover && !activePopover.contains(e.target) && !(popoverAnchor && popoverAnchor.contains(e.target))) closePopover();
+});
+
+function resolveDaysTarget(range){
+  const kind = range.kind || "emp";
+  if(kind==="manager"){
+    const area = findArea(range.areaId);
+    if(!area) return null;
+    ensureManagerId(area);
+    return area.managerDays;
+  }
+  if(kind==="planner"){
+    const area = findArea(range.areaId);
+    if(!area) return null;
+    const planner = area.planners.find(p=>p.id===range.targetId);
+    if(!planner) return null;
+    ensurePlannerDays(planner);
+    return planner.days;
+  }
+  const found = findEmp(range.hubId, range.empId) || findEmpByIdOnly(range.empId);
+  return found ? found.emp.days : null;
+}
+
+function openCellPopover(cellEl, range){
+  closePopover();
+  range = range || {kind:"emp", hubId:cellEl.dataset.hub, empId:cellEl.dataset.emp, startDay:parseInt(cellEl.dataset.day,10), endDay:parseInt(cellEl.dataset.day,10)};
+  const startDay = range.startDay, endDay = range.endDay;
+  const nSel = endDay - startDay + 1;
+  highlightSelection();
+
+  let shiftHtml = Object.keys(SHIFT_CODES).map(k=>
+    `<div class="pop-item" style="background:${shiftColor()}" data-code="${k}" title="${SHIFT_CODES[k].e1}-${SHIFT_CODES[k].u1} / ${SHIFT_CODES[k].e2}-${SHIFT_CODES[k].u2}">${k}</div>`
+  ).join("");
+  let satHtml = Object.keys(SAT_CODES).map(k=>
+    `<div class="pop-item" style="background:${satColor()}" data-code="${k}" title="${SAT_CODES[k].e1}-${SAT_CODES[k].u1} (${SAT_CODES[k].h})">${k}</div>`
+  ).join("");
+  let absHtml = Object.keys(ABSENCE_CODES).map(k=>
+    `<div class="pop-abs-item" data-code="${k}"><span class="dot" style="background:${ABSENCE_CODES[k].color}"></span>${k} — ${ABSENCE_CODES[k].label}</div>`
+  ).join("");
+
+  const pop = document.createElement("div");
+  pop.className = "popover";
+  pop.innerHTML = `
+    <button class="pop-close">✕</button>
+    ${nSel>1?`<div class="pop-range-badge">${nSel} giorni selezionati (${startDay}–${endDay})</div>`:""}
+    <h4>Turno orario</h4>
+    <div class="pop-grid">${shiftHtml}</div>
+    <h4>Sabato ridotto</h4>
+    <div class="pop-grid">${satHtml}</div>
+    <h4>Assenze / riposi</h4>
+    <div class="pop-abs">${absHtml}</div>
+    <button class="pop-clear" data-code="__clear">Svuota ${nSel>1?"celle":"cella"}</button>
+  `;
+  document.body.appendChild(pop);
+  const r = cellEl.getBoundingClientRect();
+  let left = r.left + window.scrollX;
+  let top = r.bottom + window.scrollY + 4;
+  if(left + 300 > window.innerWidth) left = window.innerWidth - 310;
+  pop.style.left = left+"px";
+  pop.style.top = top+"px";
+  activePopover = pop;
+  popoverAnchor = cellEl;
+
+  pop.querySelector(".pop-close").onclick = closePopover;
+  pop.addEventListener("click", ev=>{
+    const item = ev.target.closest("[data-code]");
+    if(!item) return;
+    let code = item.dataset.code;
+    const daysTarget = resolveDaysTarget(range);
+    if(!daysTarget) return;
+    let trSuffix = "";
+    if(code==="TR"){
+      const n = prompt(`Numero CDA / trasferta (verrà applicato a tutti i ${nSel} giorni selezionati):`,"");
+      if(n===null) return;
+      trSuffix = n;
+    }
+    for(let d=startDay; d<=endDay; d++){
+      if(code==="__clear") delete daysTarget[d];
+      else if(code==="TR") daysTarget[d] = "TR"+trSuffix;
+      else daysTarget[d] = code;
+    }
+    saveDB(); render(); closePopover();
+  });
+}
+
+/* =========================================================
+   TURNO BASE PERSONALIZZATO — popover per impostare un turno
+   feriale diverso dallo standard (E) per un singolo tecnico
+   ========================================================= */
+function openBaseShiftPopover(anchorEl, hubId, targetId){
+  closePopover();
+  let person = null;
+  const empFound = findEmp(hubId, targetId) || findEmpByIdOnly(targetId);
+  if(empFound){
+    person = empFound.emp;
+  } else {
+    const plFound = findPlannerByIdOnly(targetId);
+    if(plFound) person = plFound.planner;
+  }
+  if(!person) return;
+  const currentCode = person.baseShiftCode || "E";
+  const currentComp = person.fridayCompCode || "AA";
+
+  const items = Object.keys(SHIFT_CODES).map(k=>{
+    const c = SHIFT_CODES[k];
+    const selected = k===currentCode;
+    return `<div class="pop-item" style="background:${shiftColor()};${selected?"outline:2px solid var(--ink);":""}" data-shift="${k}" title="${c.e1}-${c.u1} / ${c.e2}-${c.u2}">${k}${selected?" ✓":""}</div>`;
+  }).join("");
+
+  const compItems = Object.keys(SAT_CODES).map(k=>{
+    const c = SAT_CODES[k];
+    const selected = k===currentComp;
+    const timeLabel = timeRangeLabel(c);
+    return `<div class="pop-item" style="background:${satColor()};${selected?"outline:2px solid var(--ink);":""}" data-comp="${k}" title="${timeLabel} (${c.h})">${k}${selected?" ✓":""}</div>`;
+  }).join("");
+
+  const pop = document.createElement("div");
+  pop.className = "popover";
+  pop.style.width = "290px";
+  pop.innerHTML = `
+    <button class="pop-close">✕</button>
+    <h4>Turno base feriale (lun-ven)</h4>
+    <p style="color:var(--muted);font-size:11px;margin:0 0 8px;">Sostituisce il turno standard (E) nei giorni lun-ven per questo tecnico. Sabati e riposi restano invariati.</p>
+    <div class="pop-grid">${items}</div>
+    <button class="pop-clear" data-shift="__reset">Ripristina turno standard (E)</button>
+    <h4 style="margin-top:14px;">Venerdì di compensazione (se lavora il sabato)</h4>
+    <p style="color:var(--muted);font-size:11px;margin:0 0 8px;">Turno usato il venerdì nelle settimane in cui lavora il sabato, per bilanciare le ore.</p>
+    <div class="pop-grid">${compItems}</div>
+    <button class="pop-clear" data-comp="__reset">Ripristina compensazione standard (AA)</button>
+  `;
+  document.body.appendChild(pop);
+  const r = anchorEl.getBoundingClientRect();
+  let left = r.left + window.scrollX;
+  let top = r.bottom + window.scrollY + 4;
+  if(left + 300 > window.innerWidth) left = window.innerWidth - 310;
+  pop.style.left = left+"px";
+  pop.style.top = top+"px";
+  activePopover = pop;
+  popoverAnchor = anchorEl;
+
+  pop.querySelector(".pop-close").onclick = closePopover;
+  pop.addEventListener("click", ev=>{
+    const shiftItem = ev.target.closest("[data-shift]");
+    const compItem = ev.target.closest("[data-comp]");
+    if(shiftItem){
+      const code = shiftItem.dataset.shift;
+      if(code==="__reset") delete person.baseShiftCode;
+      else person.baseShiftCode = code;
+      saveDB(); render(); closePopover();
+    } else if(compItem){
+      const code = compItem.dataset.comp;
+      if(code==="__reset") delete person.fridayCompCode;
+      else person.fridayCompCode = code;
+      saveDB(); render(); closePopover();
+    }
+  });
+}
+
+/* =========================================================
+   PIANO FERIE — popover di gestione periodi per tecnico
+   ========================================================= */
+function openVacationPopover(anchorEl, empId){
+  closePopover();
+  const periods = getVacationPeriods(empId).slice().sort((a,b)=> a.start.localeCompare(b.start));
+  const listHtml = periods.length
+    ? periods.map(p=>`
+        <div class="vac-period-item">
+          <span>${formatItDate(p.start)} → ${formatItDate(p.end)}</span>
+          <button class="icon-btn" data-period="${p.id}" title="Elimina periodo">✕</button>
+        </div>`).join("")
+    : `<p style="color:var(--muted);font-size:11.5px;margin:0 0 8px;">Nessun periodo di ferie pianificato.</p>`;
+
+  const pop = document.createElement("div");
+  pop.className = "popover";
+  pop.style.width = "280px";
+  pop.innerHTML = `
+    <button class="pop-close">✕</button>
+    <h4>Piano ferie</h4>
+    <div class="vac-list">${listHtml}</div>
+    <h4>Aggiungi periodo</h4>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <input type="date" id="vacStart" style="flex:1;font-size:11.5px;padding:5px;border:1px solid var(--line);border-radius:6px;font-family:inherit;">
+      <span style="color:var(--muted);font-size:11px;">→</span>
+      <input type="date" id="vacEnd" style="flex:1;font-size:11.5px;padding:5px;border:1px solid var(--line);border-radius:6px;font-family:inherit;">
+    </div>
+    <button class="pop-clear" id="btnAddVacation" style="margin-top:8px;background:var(--accent);color:#fff;border-color:var(--accent);">+ Aggiungi periodo di ferie</button>
+    <p style="color:var(--muted);font-size:10.5px;margin:8px 0 0;">Il piano vale per tutto l'anno: nei giorni coperti da un periodo, il calendario mostrerà FE automaticamente, in tutti i mesi.</p>
+  `;
+  document.body.appendChild(pop);
+  const r = anchorEl.getBoundingClientRect();
+  let left = r.left + window.scrollX;
+  let top = r.bottom + window.scrollY + 4;
+  if(left + 290 > window.innerWidth) left = window.innerWidth - 300;
+  pop.style.left = left+"px";
+  pop.style.top = top+"px";
+  activePopover = pop;
+  popoverAnchor = anchorEl;
+
+  pop.querySelector(".pop-close").onclick = closePopover;
+  pop.querySelector("#btnAddVacation").onclick = ()=>{
+    const s = document.getElementById("vacStart").value;
+    const e = document.getElementById("vacEnd").value;
+    if(!s || !e){ alert("Inserisci sia la data di inizio che quella di fine."); return; }
+    if(e < s){ alert("La data di fine deve essere uguale o successiva a quella di inizio."); return; }
+    addVacationPeriod(empId, s, e);
+    render();
+    closePopover();
+  };
+  pop.querySelectorAll("[data-period]").forEach(btn=>{
+    btn.onclick = ()=>{
+      if(!confirm("Eliminare questo periodo di ferie? I giorni torneranno al turno standard calcolato automaticamente.")) return;
+      removeVacationPeriod(empId, btn.dataset.period);
+      render();
+      closePopover();
+    };
+  });
+}
+
+/* =========================================================
+   LEGEND DRAWER
+   ========================================================= */
+const legendDrawer = document.getElementById("legendDrawer");
+const overlay = document.getElementById("overlay");
+function buildLegend(){
+  let shiftRows = Object.keys(SHIFT_CODES).map(k=>{
+    const c = SHIFT_CODES[k];
+    return `<tr><td><div class="legend-swatch" style="background:${shiftColor()}">${k}</div></td>
+      <td>${c.e1}–${c.u1}</td><td>${c.e2}–${c.u2}</td></tr>`;
+  }).join("");
+  let satRows = Object.keys(SAT_CODES).map(k=>{
+    const c = SAT_CODES[k];
+    return `<tr><td><div class="legend-swatch" style="background:${satColor()}">${k}</div></td>
+      <td>${c.e1}–${c.u1}</td><td>${c.e2}–${c.u2} <span style="color:var(--muted)">(${c.h})</span></td></tr>`;
+  }).join("");
+  let absRows = Object.keys(ABSENCE_CODES).map(k=>{
+    const c = ABSENCE_CODES[k];
+    return `<tr><td><div class="legend-swatch" style="background:${c.color}">${k}</div></td>
+      <td colspan="2">${c.label}</td></tr>`;
+  }).join("");
+
+  document.getElementById("legendBody").innerHTML = `
+    <div class="legend-section">
+      <h5>Turni orari (mattina / pomeriggio)</h5>
+      <table class="legend-table">${shiftRows}</table>
+    </div>
+    <div class="legend-section">
+      <h5>Turni ridotti (sabato / compensazioni)</h5>
+      <table class="legend-table">${satRows}</table>
+    </div>
+    <div class="legend-section">
+      <h5>Assenze e riposi</h5>
+      <table class="legend-table">${absRows}</table>
+    </div>
+  `;
+}
+/* =========================================================
+   RUOLI E PERMESSI (Amministratore / Operatore)
+   ========================================================= */
+function updateRoleButton(){
+  const btn = document.getElementById("btnRoleToggle");
+  if(isAdmin()){
+    btn.textContent = "🔓 Amministratore";
+    btn.title = "Accesso completo attivo — clicca per passare a Operatore";
+  } else {
+    btn.textContent = "🔒 Operatore";
+    btn.title = "Accesso limitato attivo — clicca per passare ad Amministratore (richiede PIN)";
+  }
+  document.getElementById("btnAddArea").style.display = isAdmin() ? "" : "none";
+  document.getElementById("btnDuplicate").style.display = isAdmin() ? "" : "none";
+  document.getElementById("btnChangePin").style.display = isAdmin() ? "" : "none";
+}
+
+document.getElementById("btnRoleToggle").onclick = ()=>{
+  if(isAdmin()){
+    if(!confirm("Passare al livello Operatore? Non potrai più aggiungere o eliminare aree, hub, tecnici o planner finché non torni al livello Amministratore.")) return;
+    currentRole = "operator";
+    localStorage.setItem(ROLE_KEY, currentRole);
+    updateRoleButton();
+    render();
+  } else {
+    const pin = prompt("Inserisci il PIN da Amministratore per sbloccare l'accesso completo:");
+    if(pin === null) return;
+    if(pin === getPin()){
+      currentRole = "admin";
+      localStorage.setItem(ROLE_KEY, currentRole);
+      updateRoleButton();
+      render();
+    } else {
+      alert("PIN errato.");
+    }
+  }
+};
+
+function changeAdminPin(){
+  if(!isAdmin()){ alert("Solo l'Amministratore può cambiare il PIN."); return; }
+  const current = prompt("Inserisci il PIN attuale:");
+  if(current === null) return;
+  if(current !== getPin()){ alert("PIN attuale errato."); return; }
+  const next = prompt("Inserisci il nuovo PIN (almeno 4 caratteri):");
+  if(next === null) return;
+  if(next.trim().length < 4){ alert("Il nuovo PIN deve avere almeno 4 caratteri."); return; }
+  const confirmNext = prompt("Conferma il nuovo PIN:");
+  if(next !== confirmNext){ alert("I due PIN non coincidono. Riprova."); return; }
+  setPin(next.trim());
+  alert("PIN aggiornato correttamente.");
+}
+
+updateRoleButton();
+document.getElementById("btnChangePin").onclick = changeAdminPin;
+
+document.getElementById("btnLegend").onclick = ()=>{ buildLegend(); legendDrawer.classList.add("open"); overlay.classList.add("show"); };
+document.getElementById("btnCloseLegend").onclick = ()=>{ legendDrawer.classList.remove("open"); overlay.classList.remove("show"); };
+overlay.onclick = ()=>{
+  legendDrawer.classList.remove("open");
+  summaryDrawer.classList.remove("open");
+  overlay.classList.remove("show");
+};
+
+/* =========================================================
+   SUMMARY DRAWER — riepilogo mensile per tecnico
+   ========================================================= */
+const summaryDrawer = document.getElementById("summaryDrawer");
+
+function buildSummary(){
+  const data = getMonth(current);
+  const nDays = daysInMonth(current);
+  const [y,m] = current.split("-").map(Number);
+  const blocks = computeWeekBlocks(y, m, nDays);
+  let html = "";
+
+  data.areas.forEach(area=>{
+    area.hubs.forEach(hub=>{
+      if(!hub.employees.length) return;
+      html += `<div class="summary-hub-title">${hub.code} ${hub.name} — ${area.name}</div>`;
+      html += `<table class="summary-table">
+        <tr><th>Nominativo</th><th class="num">Turni</th><th class="num">Sab. lav.</th><th class="num">FE</th><th class="num">Riposi</th><th class="num">Malattia</th><th class="num">Altro</th><th class="num">Non pian.</th></tr>`;
+      let hubSatTotal = 0;
+      hub.employees.forEach((emp, empIdx)=>{
+        let worked=0, satWorked=0, fe=0, riposo=0, malattia=0, altro=0, nonpian=0;
+        for(let d=1; d<=nDays; d++){
+          const v = getEffectiveCode(emp, empIdx, y, m, d, blocks);
+          const isSaturday = new Date(y,m-1,d).getDay()===6;
+          if(isWorkedCode(v)){ worked++; if(isSaturday) satWorked++; }
+          else if(!v) nonpian++;
+          else if(v==="FE") fe++;
+          else if(v==="RS4M"||v==="RS4P"||v==="RS8") riposo++;
+          else if(v==="MA"||v==="INF") malattia++;
+          else altro++;
+        }
+        hubSatTotal += satWorked;
+        html += `<tr>
+          <td>${emp.name}</td>
+          <td class="num">${worked}</td>
+          <td class="num" style="font-weight:600;color:${satWorked>0?'var(--accent-deep)':'var(--muted)'}">${satWorked||"–"}</td>
+          <td class="num">${fe||"–"}</td>
+          <td class="num">${riposo||"–"}</td>
+          <td class="num">${malattia||"–"}</td>
+          <td class="num">${altro||"–"}</td>
+          <td class="num" style="color:var(--muted)">${nonpian}</td>
+        </tr>`;
+      });
+      html += `<tr><td style="font-style:italic;color:var(--muted)">Totale sabati lavorati hub</td><td class="num"></td><td class="num" style="font-weight:600">${hubSatTotal}</td><td class="num" colspan="5"></td></tr>`;
+      html += `</table>`;
+    });
+  });
+
+  if(!html) html = `<p style="color:var(--muted);font-size:12.5px;">Nessun tecnico ancora inserito in questo mese.</p>`;
+  document.getElementById("summaryBody").innerHTML = html;
+}
+document.getElementById("btnSummary").onclick = ()=>{ buildSummary(); summaryDrawer.classList.add("open"); overlay.classList.add("show"); };
+
+/* =========================================================
+   PDF TURNI PER PERSONA (leggibile da telefono)
+   ========================================================= */
+function collectMonthPeople(){
+  const data = getMonth(current);
+  const list = [];
+  data.areas.forEach(area=>{
+    ensureManagerId(area);
+    list.push({kind:"manager", area, label:"CMM", name:area.manager||"—", id:area.managerId, context:area.name});
+    area.planners.forEach((p, idx)=>{
+      ensurePlannerDays(p);
+      list.push({kind:"planner", area, planner:p, idx, label:"PL", name:p.name, id:p.id, context:area.name});
+    });
+    area.hubs.forEach(hub=>{
+      hub.employees.forEach((emp, idx)=>{
+        list.push({kind:"emp", area, hub, emp, idx, label:emp.grade, name:emp.name, id:emp.id, context:`${area.name} · ${hub.code} ${hub.name}`});
+      });
+    });
+  });
+  return list;
+}
+function personCodeForDay(person, y, m, d, blocks){
+  if(person.kind==="manager") return getManagerEffectiveCode(person.area, y, m, d);
+  if(person.kind==="planner") return getPlannerEffectiveCode(person.planner, person.idx, y, m, d, blocks);
+  return getEffectiveCode(person.emp, person.idx, y, m, d, blocks);
+}
+function roleLabelFor(person){
+  if(person.kind==="manager") return "Cluster Manager";
+  if(person.kind==="planner") return "Planner";
+  return `Tecnico · ${person.label}`;
+}
+
+function addPersonPageToPdf(doc, person, y, m, nDays, blocks, isFirstPage){
+  if(!isFirstPage) doc.addPage();
+  doc.setFontSize(15);
+  doc.setFont(undefined,"bold");
+  doc.text(person.name, 14, 18);
+  doc.setFontSize(10);
+  doc.setFont(undefined,"normal");
+  doc.text(`${roleLabelFor(person)} — ${person.context}`, 14, 25);
+  doc.setFont(undefined,"bold");
+  doc.text(monthLabel(current), 14, 31);
+  doc.setFont(undefined,"normal");
+
+  const body = [];
+  let worked=0, satWorked=0, fe=0, riposo=0;
+  for(let d=1; d<=nDays; d++){
+    const dow = new Date(y,m-1,d).getDay();
+    const code = personCodeForDay(person, y, m, d, blocks);
+    if(isWorkedCode(code)){ worked++; if(dow===6) satWorked++; }
+    else if(code==="FE") fe++;
+    else if(code==="RS4M"||code==="RS4P"||code==="RS8") riposo++;
+    body.push([`${DOW_IT[dow]} ${d}`, code||"—", codeTimeLabel(code)]);
+  }
+
+  doc.autoTable({
+    startY: 36,
+    head: [["Giorno","Codice","Orario"]],
+    body,
+    styles:{fontSize:9, cellPadding:2.2},
+    headStyles:{fillColor:[18,33,58], textColor:255, fontStyle:"bold"},
+    columnStyles:{0:{cellWidth:28},1:{cellWidth:22,halign:"center"},2:{cellWidth:"auto"}},
+    didParseCell: (d0)=>{
+      if(d0.section==="body" && d0.column.index===1){
+        const code = d0.cell.raw;
+        const hex = fillColorForCode(code);
+        if(hex){
+          d0.cell.styles.fillColor = hexToRgbArr(hex);
+          d0.cell.styles.textColor = 255;
+          d0.cell.styles.fontStyle = "bold";
+        }
+      }
+    }
+  });
+
+  const finalY = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(10);
+  doc.setFont(undefined,"bold");
+  doc.text("Riepilogo mese", 14, finalY);
+  doc.setFont(undefined,"normal");
+  doc.text(`Turni lavorati: ${worked}    Sabati lavorati: ${satWorked}    Ferie: ${fe}    Riposi: ${riposo}`, 14, finalY+6);
+}
+
+function generatePersonPdf(person){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:"mm", format:"a4"});
+  const nDays = daysInMonth(current);
+  const [y,m] = current.split("-").map(Number);
+  const blocks = computeWeekBlocks(y, m, nDays);
+  addPersonPageToPdf(doc, person, y, m, nDays, blocks, true);
+  const safeName = person.name.replace(/[^a-z0-9]+/gi,"_");
+  doc.save(`Turni_${safeName}_${monthLabel(current).replace(" ","_")}.pdf`);
+}
+function generateAllPdf(){
+  const people = collectMonthPeople();
+  if(!people.length){ alert("Nessuna persona in questo mese."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:"mm", format:"a4"});
+  const nDays = daysInMonth(current);
+  const [y,m] = current.split("-").map(Number);
+  const blocks = computeWeekBlocks(y, m, nDays);
+  people.forEach((person, idx)=> addPersonPageToPdf(doc, person, y, m, nDays, blocks, idx===0));
+  doc.save(`Turni_TUTTI_${monthLabel(current).replace(" ","_")}.pdf`);
+}
+
+function openPdfPicker(){
+  const people = collectMonthPeople();
+  const listHtml = people.length
+    ? people.map(p=>`
+        <div class="vac-period-item">
+          <span>${p.name} <span style="color:var(--muted);">— ${roleLabelFor(p)}</span></span>
+          <button class="icon-btn" data-pdf-person="${p.id}" title="Genera PDF">📄</button>
+        </div>`).join("")
+    : `<p style="color:var(--muted);font-size:11.5px;">Nessuna persona pianificata questo mese.</p>`;
+
+  const pop = document.createElement("div");
+  pop.className = "popover";
+  pop.style.width = "300px";
+  pop.innerHTML = `
+    <button class="pop-close">✕</button>
+    <h4>PDF turni per persona</h4>
+    <div class="vac-list" style="max-height:260px;overflow:auto;">${listHtml}</div>
+    <button class="pop-clear" id="btnPdfAll" style="margin-top:8px;background:var(--accent);color:#fff;border-color:var(--accent);">📄 Genera PDF per tutti (un file, una pagina a testa)</button>
+    <p style="color:var(--muted);font-size:10.5px;margin:8px 0 0;">Ogni PDF mostra i turni del mese giorno per giorno, pensato per essere letto comodamente da telefono.</p>
+  `;
+  document.body.appendChild(pop);
+  const btn = document.getElementById("btnPdfPerPerson");
+  const r = btn.getBoundingClientRect();
+  let left = r.left + window.scrollX;
+  let top = r.bottom + window.scrollY + 4;
+  if(left + 310 > window.innerWidth) left = window.innerWidth - 320;
+  pop.style.left = left+"px";
+  pop.style.top = top+"px";
+  activePopover = pop;
+  popoverAnchor = btn;
+
+  pop.querySelector(".pop-close").onclick = closePopover;
+  pop.querySelectorAll("[data-pdf-person]").forEach(b=>{
+    b.onclick = ()=>{
+      const person = people.find(p=>p.id===b.dataset.pdfPerson);
+      if(person) generatePersonPdf(person);
+    };
+  });
+  pop.querySelector("#btnPdfAll").onclick = ()=>{ generateAllPdf(); closePopover(); };
+}
+document.getElementById("btnPdfPerPerson").onclick = openPdfPicker;
+document.getElementById("btnCloseSummary").onclick = ()=>{ summaryDrawer.classList.remove("open"); overlay.classList.remove("show"); };
+
+/* =========================================================
+   PRINT
+   ========================================================= */
+document.getElementById("btnPrint").onclick = ()=> window.print();
+
+/* =========================================================
+   EXPORT TO EXCEL (SheetJS) — replica il layout del modulo originale
+   ========================================================= */
+document.getElementById("btnExport").onclick = ()=>{
+  const data = getMonth(current);
+  const nDays = daysInMonth(current);
+  const [y,m] = current.split("-").map(Number);
+  const blocks = computeWeekBlocks(y, m, nDays);
+  const dayColStart = 3; // colonne 0,1,2 = area/grado/nominativo, poi i giorni
+
+  const INK = "12213A";
+  const INK_WEEKEND = "0C1728";
+  const ACCENT_DEEP = "1F5867";
+  const AMBER = "C9821E";
+
+  const aoa = [];
+  const rowMeta = [];
+
+  aoa.push(["MODULO PIANIFICAZIONE ORARI DI LAVORO SETTIMANALI", "", "", "MESE DI", monthLabel(current).toUpperCase()]);
+  rowMeta.push({type:"title"});
+  aoa.push([]); rowMeta.push({type:"blank"});
+
+  let dowRow = ["", "NOMINATIVI", ""];
+  let numRow = ["GRADE", "", ""];
+  for(let d=1; d<=nDays; d++){
+    const dow = new Date(y,m-1,d).getDay();
+    dowRow.push(DOW_IT[dow]);
+    numRow.push(d);
+  }
+  aoa.push(dowRow); rowMeta.push({type:"header"});
+  aoa.push(numRow); rowMeta.push({type:"header"});
+
+  let hubColorIdx = 0;
+  data.areas.forEach(area=>{
+    const areaRow = [area.name, "", "PLANNER/CMM"];
+    for(let i=0;i<nDays;i++) areaRow.push("");
+    aoa.push(areaRow); rowMeta.push({type:"area"});
+
+    const cmRow = [area.name, "CMM", area.manager];
+    for(let d=1; d<=nDays; d++) cmRow.push(getManagerEffectiveCode(area, y, m, d));
+    aoa.push(cmRow); rowMeta.push({type:"person"});
+
+    area.planners.forEach((p, idx)=>{
+      const row = [area.name, "PL", p.name];
+      for(let d=1; d<=nDays; d++) row.push(getPlannerEffectiveCode(p, idx, y, m, d, blocks));
+      aoa.push(row); rowMeta.push({type:"person"});
+    });
+
+    area.hubs.forEach(hub=>{
+      const hubColor = hexNoHash(HUB_PALETTE[hubColorIdx % HUB_PALETTE.length]);
+      hubColorIdx++;
+      const hubRow = [area.name, "", `${hub.code} ${hub.name} ${hub.type||""}`.trim()];
+      for(let i=0;i<nDays;i++) hubRow.push("");
+      aoa.push(hubRow); rowMeta.push({type:"hub", color:hubColor});
+
+      hub.employees.forEach((emp, empIdx)=>{
+        const row = [area.name, emp.grade, emp.name];
+        for(let d=1; d<=nDays; d++) row.push(getEffectiveCode(emp, empIdx, y, m, d, blocks)||"");
+        aoa.push(row); rowMeta.push({type:"person"});
+      });
+    });
+    aoa.push([]); rowMeta.push({type:"blank"});
+  });
+
+  aoa.push([]); rowMeta.push({type:"blank"});
+  aoa.push(["Legenda orari di lavoro"]); rowMeta.push({type:"legend-title"});
+  aoa.push(["Codice","Entrata M.","Uscita M.","Entrata P.","Uscita P."]); rowMeta.push({type:"legend-header"});
+  Object.keys(SHIFT_CODES).forEach(k=>{
+    const c = SHIFT_CODES[k];
+    aoa.push([k, c.e1, c.u1, c.e2, c.u2]);
+    rowMeta.push({type:"legend-shift"});
+  });
+  aoa.push([]); rowMeta.push({type:"blank"});
+  aoa.push(["Sabato ridotto","Entrata","Uscita","Entrata P.","Uscita P.","Ore"]); rowMeta.push({type:"legend-header"});
+  Object.keys(SAT_CODES).forEach(k=>{
+    const c = SAT_CODES[k];
+    aoa.push([k, c.e1, c.u1, c.e2, c.u2, c.h]);
+    rowMeta.push({type:"legend-sat"});
+  });
+  aoa.push([]); rowMeta.push({type:"blank"});
+  aoa.push(["Assenze / riposi","Descrizione"]); rowMeta.push({type:"legend-header"});
+  Object.keys(ABSENCE_CODES).forEach(k=>{
+    aoa.push([k, ABSENCE_CODES[k].label]);
+    rowMeta.push({type:"legend-abs", code:k});
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:16},{wch:10},{wch:24}].concat(Array(nDays).fill({wch:5}));
+
+  const weekEndCols = new Set(blocks.map(b=> dayColStart + (b.end - 1)));
+
+  for(let r=0; r<aoa.length; r++){
+    const meta = rowMeta[r];
+    const rowArr = aoa[r];
+    for(let c=0; c<rowArr.length; c++){
+      const addr = XLSX.utils.encode_cell({r, c});
+      if(!ws[addr]) continue;
+      let style = null;
+
+      if(meta.type==="title"){
+        style = { font:{bold:true, sz:13} };
+      } else if(meta.type==="header"){
+        let fill = INK;
+        if(c>=dayColStart){
+          const day = c - dayColStart + 1;
+          const dow = new Date(y,m-1,day).getDay();
+          if(dow===0) fill = ACCENT_DEEP;
+          else if(dow===6) fill = INK_WEEKEND;
+        }
+        style = { font:{bold:true, color:{rgb:"FFFFFF"}}, fill:{fgColor:{rgb:fill}}, alignment:{horizontal:"center"} };
+      } else if(meta.type==="area"){
+        style = { font:{bold:true, color:{rgb:"FFFFFF"}}, fill:{fgColor:{rgb:ACCENT_DEEP}} };
+      } else if(meta.type==="hub"){
+        style = { font:{bold:true, color:{rgb:"FFFFFF"}}, fill:{fgColor:{rgb:meta.color}} };
+      } else if(meta.type==="person" && c>=dayColStart){
+        const fillC = fillColorForCode(rowArr[c]);
+        if(fillC) style = { font:{bold:true, color:{rgb:"FFFFFF"}}, fill:{fgColor:{rgb:fillC}}, alignment:{horizontal:"center"} };
+      } else if(meta.type==="legend-header"){
+        style = { font:{bold:true} };
+      } else if(meta.type==="legend-shift" && c===0){
+        style = { font:{bold:true, color:{rgb:"FFFFFF"}}, fill:{fgColor:{rgb:hexNoHash(shiftColor())}}, alignment:{horizontal:"center"} };
+      } else if(meta.type==="legend-sat" && c===0){
+        style = { font:{bold:true, color:{rgb:"FFFFFF"}}, fill:{fgColor:{rgb:hexNoHash(satColor())}}, alignment:{horizontal:"center"} };
+      } else if(meta.type==="legend-abs" && c===0 && ABSENCE_CODES[meta.code]){
+        style = { font:{bold:true, color:{rgb:"FFFFFF"}}, fill:{fgColor:{rgb:hexNoHash(ABSENCE_CODES[meta.code].color)}}, alignment:{horizontal:"center"} };
+      }
+
+      if(weekEndCols.has(c) && ["person","hub","area","header"].includes(meta.type)){
+        style = style || {};
+        style.border = Object.assign({}, style.border, { right:{ style:"medium", color:{rgb:AMBER} } });
+      }
+      if(style) ws[addr].s = style;
+    }
+  }
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, monthLabel(current).slice(0,28));
+  XLSX.writeFile(wb, `Turnistica_${monthLabel(current).replace(" ","_")}.xlsx`);
+};
+
+/* =========================================================
+   AUTOSAVE SU FILE LOCALE (File System Access API — Chrome/Edge)
+   ========================================================= */
+let autosaveHandle = null;
+let autosaveTimer = null;
+
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const req = indexedDB.open("vetroops_fs", 1);
+    req.onupgradeneeded = ()=> req.result.createObjectStore("handles");
+    req.onsuccess = ()=> res(req.result);
+    req.onerror = ()=> rej(req.error);
+  });
+}
+async function idbSet(key, val){
+  const db = await idbOpen();
+  return new Promise((res,rej)=>{
+    const tx = db.transaction("handles","readwrite");
+    tx.objectStore("handles").put(val, key);
+    tx.oncomplete = ()=>res();
+    tx.onerror = ()=>rej(tx.error);
+  });
+}
+async function idbGet(key){
+  const db = await idbOpen();
+  return new Promise((res,rej)=>{
+    const tx = db.transaction("handles","readonly");
+    const req = tx.objectStore("handles").get(key);
+    req.onsuccess = ()=>res(req.result);
+    req.onerror = ()=>rej(req.error);
+  });
+}
+
+function setAutosaveStatus(text, ok){
+  const el = document.getElementById("autosaveStatus");
+  if(!el) return;
+  el.textContent = text;
+  el.style.color = ok===true ? "#2F8F5B" : ok===false ? "#B23B4A" : "var(--muted)";
+}
+
+async function writeAutosaveFile(){
+  if(!autosaveHandle) return;
+  try{
+    const writable = await autosaveHandle.createWritable();
+    await writable.write(JSON.stringify(DB, null, 2));
+    await writable.close();
+    setAutosaveStatus("● file collegato — salvataggio automatico attivo ("+autosaveHandle.name+")", true);
+  }catch(e){
+    console.warn("Scrittura autosave fallita", e);
+    setAutosaveStatus("● errore nella scrittura sul file collegato", false);
+  }
+}
+function scheduleAutosaveWrite(){
+  if(!autosaveHandle) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(writeAutosaveFile, 700);
+}
+
+async function connectAutosaveFile(){
+  if(!window.showSaveFilePicker){
+    alert("Il tuo browser non supporta il salvataggio automatico su file (funzione disponibile su Chrome/Edge). Usa comunque i pulsanti Backup / Ripristina per salvare in sicurezza.");
+    return;
+  }
+  try{
+    const handle = await window.showSaveFilePicker({
+      suggestedName: "vetroops_turnistica_backup.json",
+      types: [{description:"Backup VetroOps (JSON)", accept:{"application/json":[".json"]}}]
+    });
+    autosaveHandle = handle;
+    await idbSet("handle", handle);
+    await writeAutosaveFile();
+  }catch(e){ /* utente ha annullato la selezione */ }
+}
+
+async function tryReconnectAutosave(){
+  if(!window.indexedDB || !window.showSaveFilePicker) return;
+  try{
+    const handle = await idbGet("handle");
+    if(!handle) return;
+    const perm = await handle.queryPermission({mode:"readwrite"});
+    if(perm === "granted"){
+      autosaveHandle = handle;
+      setAutosaveStatus("● file collegato — salvataggio automatico attivo ("+handle.name+")", true);
+    } else {
+      setAutosaveStatus("● file collegato in precedenza — clicca \"Autosave su file\" per riattivarlo", null);
+    }
+  }catch(e){ /* handle non più valido, ignora */ }
+}
+
+document.getElementById("btnConnectFile").onclick = connectAutosaveFile;
+if(!window.showSaveFilePicker){
+  document.getElementById("btnConnectFile").style.display = "none";
+}
+
+/* =========================================================
+   BACKUP / RIPRISTINO MANUALE (.json) — funziona su ogni browser
+   ========================================================= */
+function downloadBackup(){
+  const blob = new Blob([JSON.stringify(DB, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().slice(0,10);
+  a.download = `vetroops_turnistica_backup_${stamp}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+document.getElementById("btnBackup").onclick = downloadBackup;
+
+document.getElementById("btnRestore").onclick = ()=> document.getElementById("restoreInput").click();
+document.getElementById("restoreInput").addEventListener("change", e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const parsed = JSON.parse(reader.result);
+      if(!parsed || !parsed.months){ alert("Il file selezionato non è un backup valido."); return; }
+      if(!confirm("Questo sostituirà tutti i dati attuali con quelli del backup selezionato. Continuare?")) return;
+      DB = parsed;
+      if(!DB.vacationPlans) DB.vacationPlans = {};
+      current = DB.lastOpen || defaultKey();
+      saveDB();
+      render();
+      alert("Backup ripristinato correttamente.");
+    }catch(err){ alert("Errore nella lettura del file: non è un JSON valido."); }
+  };
+  reader.readAsText(file);
+  e.target.value = "";
+});
+
+/* Avviso di sicurezza alla chiusura, se non è collegato un file autosave */
+window.addEventListener("beforeunload", (e)=>{
+  if(!autosaveHandle){
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+
+/* =========================================================
+   BACKUP AUTOMATICO PERIODICO (fallback universale, funziona su Safari)
+   ========================================================= */
+const AUTO_BACKUP_KEY = "vetroops_autobackup_on";
+let autoBackupDirty = false;
+let autoBackupInterval = null;
+
+function startAutoBackup(){
+  if(autoBackupInterval) return;
+  autoBackupInterval = setInterval(()=>{
+    if(autoBackupDirty){
+      downloadBackup();
+      autoBackupDirty = false;
+    }
+  }, 5*60*1000);
+}
+function stopAutoBackup(){
+  clearInterval(autoBackupInterval);
+  autoBackupInterval = null;
+}
+const autoBackupToggle = document.getElementById("autoBackupToggle");
+autoBackupToggle.checked = localStorage.getItem(AUTO_BACKUP_KEY) === "1";
+if(autoBackupToggle.checked) startAutoBackup();
+autoBackupToggle.addEventListener("change", ()=>{
+  localStorage.setItem(AUTO_BACKUP_KEY, autoBackupToggle.checked ? "1" : "0");
+  if(autoBackupToggle.checked) startAutoBackup(); else stopAutoBackup();
+});
+
+tryReconnectAutosave();
+
+/* =========================================================
+   INIT
+   ========================================================= */
+render();
+</script>
+</body>
+</html>
