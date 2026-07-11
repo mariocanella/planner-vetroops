@@ -357,10 +357,12 @@ table.ferie td.ferie-cell:hover{outline:2px solid var(--brand);outline-offset:-2
   const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_CONFIG.projectId}/databases/(default)/documents/planner_kv`;
 
   function fsFetchConTimeout(url, options, timeoutMs) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    return fetch(url, Object.assign({}, options || {}, { signal: controller.signal }))
-      .finally(() => clearTimeout(timer));
+    // Promise.race invece di AbortController: alcuni ambienti (inclusi certi strumenti
+    // di anteprima) lanciano "DataCloneError" quando provano a gestire un AbortSignal.
+    return Promise.race([
+      fetch(url, options || {}),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore: timeout dopo ' + timeoutMs + 'ms')), timeoutMs)),
+    ]);
   }
 
   window.__fsGet = async function (key) {
@@ -382,6 +384,32 @@ table.ferie td.ferie-cell:hover{outline:2px solid var(--brand);outline-offset:-2
     if (!res.ok) throw new Error('Firestore SET fallito: ' + res.status);
     return true;
   };
+
+  // Legge più documenti in UNA SOLA richiesta HTTP invece di una per ciascuno:
+  // evita di aprire tante connessioni contemporanee al database ad ogni aggiornamento.
+  window.__fsGetMulti = async function (keys) {
+    const url = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_CONFIG.projectId}/databases/(default)/documents:batchGet?key=${FIRESTORE_CONFIG.apiKey}`;
+    const base = `projects/${FIRESTORE_CONFIG.projectId}/databases/(default)/documents/planner_kv`;
+    const body = { documents: keys.map(k => `${base}/${k}`) };
+    const res = await fsFetchConTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, 8000);
+    if (!res.ok) throw new Error('Firestore batchGet fallito: ' + res.status);
+    const arr = await res.json();
+    const result = {};
+    (arr || []).forEach(item => {
+      if (item.found) {
+        const key = item.found.name.split('/planner_kv/')[1];
+        result[key] = (item.found.fields && item.found.fields.value && item.found.fields.value.stringValue != null) ? item.found.fields.value.stringValue : null;
+      } else if (item.missing) {
+        const key = item.missing.split('/planner_kv/')[1];
+        result[key] = null;
+      }
+    });
+    return result;
+  };
 </script>
 
 <script>
@@ -401,13 +429,12 @@ const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjQ1NGF
 const SOGLIA_SUGGERIMENTO_MIN = 10; // minuti di risparmio (a tratta) sotto i quali non vale la pena suggerire il cambio sede
 
 async function fetchConTimeout(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...(options || {}), signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+  // Promise.race invece di AbortController: evita il DataCloneError che alcuni
+  // ambienti (inclusi certi strumenti di anteprima) generano con un AbortSignal.
+  return Promise.race([
+    fetch(url, options || {}),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout dopo ' + timeoutMs + 'ms')), timeoutMs)),
+  ]);
 }
 
 async function orsGeocode(query) {
@@ -501,15 +528,20 @@ function rebuildIndici() {
   });
 }
 
-async function loadAnagrafica() {
+async function loadAnagrafica(pref) {
   try {
     await window.__firebaseReady;
-    const [vSedi, vTecnici, vOwner, vCapMap] = await Promise.all([
-      window.__fsGet('sedi_custom'),
-      window.__fsGet('tecnici_custom'),
-      window.__fsGet('sede_owner'),
-      window.__fsGet('capmap_custom'),
-    ]);
+    let vSedi, vTecnici, vOwner, vCapMap;
+    if (pref) {
+      vSedi = pref.sedi_custom; vTecnici = pref.tecnici_custom; vOwner = pref.sede_owner; vCapMap = pref.capmap_custom;
+    } else {
+      [vSedi, vTecnici, vOwner, vCapMap] = await Promise.all([
+        window.__fsGet('sedi_custom'),
+        window.__fsGet('tecnici_custom'),
+        window.__fsGet('sede_owner'),
+        window.__fsGet('capmap_custom'),
+      ]);
+    }
     if (vSedi && vTecnici) {
       const parsedSedi = JSON.parse(vSedi);
       const parsedTecnici = JSON.parse(vTecnici);
@@ -679,10 +711,10 @@ function ricalcolaOrdiniPerTecnico(nome, data, jobsArray) {
 }
 
 // ---------- storage ----------
-async function loadJobs() {
+async function loadJobs(pref) {
   try {
     await window.__firebaseReady;
-    const v = await window.__fsGet('jobs_all');
+    const v = pref !== undefined ? pref : await window.__fsGet('jobs_all');
     return v ? JSON.parse(v) : [];
   } catch (e) { console.error('load jobs failed', e); return []; }
 }
@@ -693,18 +725,18 @@ async function saveJobs(jobs) {
     return true;
   } catch (e) { console.error('save jobs failed', e); return false; }
 }
-async function loadDispo() {
+async function loadDispo(pref) {
   try {
     await window.__firebaseReady;
-    const v = await window.__fsGet('disponibilita');
+    const v = pref !== undefined ? pref : await window.__fsGet('disponibilita');
     return v ? JSON.parse(v) : {};
   } catch (e) { console.error('load dispo failed', e); return {}; }
 }
 // Disponibilità calcolata dal modulo Turnistica (sola lettura: Planner Officina Mobile non scrive mai qui).
-async function loadDispoTurnistica() {
+async function loadDispoTurnistica(pref) {
   try {
     await window.__firebaseReady;
-    const v = await window.__fsGet('disponibilita_turnistica');
+    const v = pref !== undefined ? pref : await window.__fsGet('disponibilita_turnistica');
     return v ? JSON.parse(v) : {};
   } catch (e) { console.error('load dispo turnistica failed', e); return {}; }
 }
@@ -717,10 +749,10 @@ async function saveDispo(obj) {
 }
 function dispoKey(data, nome) { return `${data}|${nome}`; }
 
-async function loadAuth() {
+async function loadAuth(pref) {
   try {
     await window.__firebaseReady;
-    const v = await window.__fsGet('auth');
+    const v = pref !== undefined ? pref : await window.__fsGet('auth');
     return v ? JSON.parse(v) : {};
   } catch (e) { console.error('load auth failed', e); return {}; }
 }
@@ -1235,13 +1267,36 @@ function mostraErroreInContenuto(e) {
 // Traccia visibile in pagina di ogni passo del caricamento dati, per capire dove si ferma
 // senza bisogno di Console/Inspector. Compare in basso a destra, sempre in vista.
 async function refreshData() {
-  const [jobs, dispo, dispoTurnistica, auth] = await Promise.all([
-    loadJobs(), loadDispo(), loadDispoTurnistica(), loadAuth(), loadAnagrafica(),
-  ]);
-  state.jobs = jobs;
-  state.dispo = dispo;
-  state.dispoTurnistica = dispoTurnistica;
-  state.auth = auth;
+  await window.__firebaseReady;
+  const CHIAVI = ['jobs_all', 'disponibilita', 'disponibilita_turnistica', 'auth', 'sedi_custom', 'tecnici_custom', 'sede_owner', 'capmap_custom'];
+  let batch = null;
+  try {
+    if (window.__fsGetMulti) batch = await window.__fsGetMulti(CHIAVI);
+  } catch (e) {
+    console.error('richiesta combinata fallita, riprovo con richieste singole', e);
+  }
+  if (batch) {
+    const [jobs, dispo, dispoTurnistica, auth] = await Promise.all([
+      loadJobs(batch.jobs_all),
+      loadDispo(batch.disponibilita),
+      loadDispoTurnistica(batch.disponibilita_turnistica),
+      loadAuth(batch.auth),
+      loadAnagrafica({ sedi_custom: batch.sedi_custom, tecnici_custom: batch.tecnici_custom, sede_owner: batch.sede_owner, capmap_custom: batch.capmap_custom }).then(() => null),
+    ]);
+    state.jobs = jobs;
+    state.dispo = dispo;
+    state.dispoTurnistica = dispoTurnistica;
+    state.auth = auth;
+  } else {
+    // riserva: se la richiesta combinata non è disponibile o fallisce, richieste singole come prima
+    const [jobs, dispo, dispoTurnistica, auth] = await Promise.all([
+      loadJobs(), loadDispo(), loadDispoTurnistica(), loadAuth(), loadAnagrafica(),
+    ]);
+    state.jobs = jobs;
+    state.dispo = dispo;
+    state.dispoTurnistica = dispoTurnistica;
+    state.auth = auth;
+  }
   state.loaded = true;
 }
 async function refreshAndRender() {
