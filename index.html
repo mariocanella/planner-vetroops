@@ -351,7 +351,7 @@ table.ferie td.ferie-cell:hover{outline:2px solid var(--brand);outline-offset:-2
 // Planner Officina Mobile — logica applicativa
 // ============================================================
 const BUNDLE = JSON.parse(document.getElementById('bundle-data').textContent);
-const { sedi, tecnici: tecniciRaw, parametri, centri, capMap, roles } = BUNDLE;
+const { parametri, centri, capMap, roles } = BUNDLE;
 const CAPACITA_MIN = 480; // capacità netta giornaliera per tecnico
 const SOGLIA_GIALLO = 540;
 
@@ -440,17 +440,72 @@ async function trovaSedePiuVicina(cap) {
     .sort((a, b) => a.minutiAndata - b.minutiAndata);
 }
 
-// ---------- indici derivati ----------
-const addrToComune = {};
-sedi.forEach(s => { addrToComune[s.sede] = s.comune; });
-const sedeByComune = {};
-sedi.forEach(s => { sedeByComune[s.comune] = s; });
-const tecnici = tecniciRaw.map(t => ({ ...t, comune: addrToComune[t.sede] || null }));
-const tecniciByComune = {};
-tecnici.forEach(t => {
-  if (!t.comune) return;
-  (tecniciByComune[t.comune] = tecniciByComune[t.comune] || []).push(t);
-});
+// ---------- indici derivati (dinamici: sedi e tecnici sono modificabili dall'Admin) ----------
+let sedi = [];
+let tecnici = [];
+let addrToComune = {};
+let sedeByComune = {};
+let tecniciByComune = {};
+let sedeOwner = {}; // { comune: 'eva' | 'leo' } — a chi è assegnata la sede (l'Admin vede sempre tutto)
+
+function rebuildIndici() {
+  addrToComune = {};
+  sedi.forEach(s => { addrToComune[s.sede] = s.comune; });
+  sedeByComune = {};
+  sedi.forEach(s => { sedeByComune[s.comune] = s; });
+  tecniciByComune = {};
+  tecnici.forEach(t => {
+    if (!t.comune) return;
+    (tecniciByComune[t.comune] = tecniciByComune[t.comune] || []).push(t);
+  });
+}
+
+async function loadAnagrafica() {
+  try {
+    await window.__firebaseReady;
+    const [vSedi, vTecnici, vOwner] = await Promise.all([
+      window.__fsGet('sedi_custom'),
+      window.__fsGet('tecnici_custom'),
+      window.__fsGet('sede_owner'),
+    ]);
+    if (vSedi && vTecnici) {
+      const parsedSedi = JSON.parse(vSedi);
+      const parsedTecnici = JSON.parse(vTecnici);
+      if (Array.isArray(parsedSedi) && Array.isArray(parsedTecnici)) {
+        sedi = parsedSedi;
+        tecnici = parsedTecnici;
+        sedeOwner = vOwner ? JSON.parse(vOwner) : {};
+      } else {
+        throw new Error('sedi_custom/tecnici_custom non sono array validi');
+      }
+    } else {
+      // Primo avvio: semina i dati dal bundle originale (Excel) e crea l'assegnazione sedi già nota.
+      sedi = BUNDLE.sedi.slice();
+      const addr = {}; BUNDLE.sedi.forEach(s => { addr[s.sede] = s.comune; });
+      tecnici = BUNDLE.tecnici.map(t => ({ nome: t.nome, comune: addr[t.sede] || null, competenza: t.competenza }));
+      const owner = {};
+      (BUNDLE.roles.eva.comuni || []).forEach(c => { owner[c] = 'eva'; });
+      (BUNDLE.roles.leo.comuni || []).forEach(c => { owner[c] = 'leo'; });
+      sedeOwner = owner;
+      await Promise.all([
+        window.__fsSet('sedi_custom', JSON.stringify(sedi)),
+        window.__fsSet('tecnici_custom', JSON.stringify(tecnici)),
+        window.__fsSet('sede_owner', JSON.stringify(sedeOwner)),
+      ]);
+    }
+  } catch (e) {
+    console.error('caricamento anagrafica fallito, uso i dati di riserva', e);
+    sedi = BUNDLE.sedi.slice();
+    const addrFallback = {}; sedi.forEach(s => { addrFallback[s.sede] = s.comune; });
+    tecnici = BUNDLE.tecnici.map(t => ({ nome: t.nome, comune: addrFallback[t.sede] || null, competenza: t.competenza }));
+    sedeOwner = {};
+  }
+  rebuildIndici();
+}
+async function saveSediCustom() { try { await window.__firebaseReady; await window.__fsSet('sedi_custom', JSON.stringify(sedi)); return true; } catch (e) { console.error(e); return false; } }
+async function saveTecniciCustom() { try { await window.__firebaseReady; await window.__fsSet('tecnici_custom', JSON.stringify(tecnici)); return true; } catch (e) { console.error(e); return false; } }
+async function saveSedeOwner() { try { await window.__firebaseReady; await window.__fsSet('sede_owner', JSON.stringify(sedeOwner)); return true; } catch (e) { console.error(e); return false; } }
+
 const parametriByTipo = {};
 parametri.forEach(p => { parametriByTipo[p.tipo] = p; });
 
@@ -633,7 +688,8 @@ const state = {
 };
 
 function roleScopeComuni() {
-  return roles[state.user].comuni;
+  if (roles[state.user].admin) return sedi.map(s => s.comune);
+  return sedi.filter(s => sedeOwner[s.comune] === state.user).map(s => s.comune);
 }
 function isInScope(comune) {
   if (!comune) return false;
@@ -644,6 +700,7 @@ function isInScope(comune) {
 const root = document.getElementById('app');
 
 async function init() {
+  await loadAnagrafica();
   state.auth = await loadAuth();
   const saved = sessionStorage.getItem('planner_user');
   if (saved && roles[saved]) {
@@ -846,6 +903,62 @@ async function resetPasswordFor(key) {
   if (ok) { state.auth = auth; toast(`Password di ${roles[key].label} resettata`); renderTab(); }
 }
 
+// ---------- gestione anagrafica: sedi e tecnici (solo Admin) ----------
+async function aggiungiSede(f, c) {
+  if (!f.comune || !f.indirizzo) { toast('Comune e indirizzo sono obbligatori.'); return; }
+  const comuneNorm = f.comune.trim().toUpperCase();
+  await refreshData();
+  if (sedi.some(s => s.comune === comuneNorm)) { toast('Esiste già una sede con questo nome comune.'); return; }
+  sedi = sedi.concat([{ sede: f.indirizzo.trim(), comune: comuneNorm, cap: (f.cap || '').trim(), nOfficine: 1, transitoGiorni: Number(f.transitoGiorni) || 1 }]);
+  if (f.assegnata && f.assegnata !== 'nessuno') sedeOwner[comuneNorm] = f.assegnata;
+  const ok = await saveSediCustom();
+  const ok2 = await saveSedeOwner();
+  if (ok && ok2) { rebuildIndici(); toast(`Sede ${comuneNorm} aggiunta`); renderTecnici(c); }
+  else toast('Errore nel salvataggio, riprova.');
+}
+
+async function eliminaSede(comune, c) {
+  const coinvolti = tecnici.filter(t => t.comune === comune);
+  if (coinvolti.length) { toast(`Impossibile eliminare: ${coinvolti.length} tecnici sono ancora assegnati a questa sede. Rimuovili o spostali prima.`); return; }
+  if (!confirm(`Eliminare la sede ${comune}? I job storici già registrati non vengono toccati.`)) return;
+  await refreshData();
+  sedi = sedi.filter(s => s.comune !== comune);
+  delete sedeOwner[comune];
+  const ok = await saveSediCustom();
+  const ok2 = await saveSedeOwner();
+  if (ok && ok2) { rebuildIndici(); toast('Sede eliminata'); renderTecnici(c); }
+  else toast('Errore nel salvataggio, riprova.');
+}
+
+async function cambiaAssegnazioneSede(comune, nuovoOwner, c) {
+  await refreshData();
+  if (nuovoOwner === 'nessuno') delete sedeOwner[comune];
+  else sedeOwner[comune] = nuovoOwner;
+  const ok = await saveSedeOwner();
+  if (ok) { toast('Assegnazione aggiornata'); renderTecnici(c); }
+  else toast('Errore nel salvataggio, riprova.');
+}
+
+async function aggiungiTecnico(f, c) {
+  if (!f.nome || !f.comune) { toast('Nome e sede sono obbligatori.'); return; }
+  const nomeNorm = f.nome.trim().toUpperCase();
+  await refreshData();
+  if (tecnici.some(t => t.nome === nomeNorm)) { toast('Esiste già un tecnico con questo nome.'); return; }
+  tecnici = tecnici.concat([{ nome: nomeNorm, comune: f.comune, competenza: (f.competenza || '').trim() }]);
+  const ok = await saveTecniciCustom();
+  if (ok) { rebuildIndici(); toast(`Tecnico ${nomeNorm} aggiunto`); renderTecnici(c); }
+  else toast('Errore nel salvataggio, riprova.');
+}
+
+async function eliminaTecnico(nome, c) {
+  if (!confirm(`Eliminare il tecnico ${nome}? Job e disponibilità già registrati restano nello storico.`)) return;
+  await refreshData();
+  tecnici = tecnici.filter(t => t.nome !== nome);
+  const ok = await saveTecniciCustom();
+  if (ok) { rebuildIndici(); toast('Tecnico eliminato'); renderTecnici(c); }
+  else toast('Errore nel salvataggio, riprova.');
+}
+
 
 let pollHandle = null;
 async function renderShell() {
@@ -911,6 +1024,7 @@ async function refreshData() {
   state.jobs = await loadJobs();
   state.dispo = await loadDispo();
   state.auth = await loadAuth();
+  await loadAnagrafica();
   state.loaded = true;
 }
 async function refreshAndRender() {
@@ -2215,6 +2329,73 @@ function renderTecnici(c) {
         </tbody>
       </table>
     </div>` : ''}
+    ${isAdmin ? `
+    <div class="panel" style="margin-bottom:16px">
+      <div class="section-title">Gestione sedi</div>
+      <div class="section-sub">Aggiungi o rimuovi filiali. Una sede nuova non ha ancora CAP automaticamente instradati: usa il suggerimento "sede più vicina" in Nuovo Job per instradarci i primi job.</div>
+      <table class="data">
+        <thead><tr><th>Comune</th><th>Indirizzo</th><th>Transito</th><th>Assegnata a</th><th></th></tr></thead>
+        <tbody>
+          ${sedi.map(s => `
+            <tr>
+              <td><strong>${escapeHtml(s.comune)}</strong></td>
+              <td style="font-size:12px;color:var(--ink-soft)">${escapeHtml(s.sede)}</td>
+              <td>${s.transitoGiorni || 1} gg</td>
+              <td>
+                <select class="select-status sede-owner-select" data-comune="${escapeHtml(s.comune)}" style="font-size:12px">
+                  <option value="nessuno" ${!sedeOwner[s.comune] ? 'selected' : ''}>Solo Admin</option>
+                  <option value="eva" ${sedeOwner[s.comune]==='eva' ? 'selected' : ''}>Eva</option>
+                  <option value="leo" ${sedeOwner[s.comune]==='leo' ? 'selected' : ''}>Leo</option>
+                </select>
+              </td>
+              <td><button class="link-btn sede-elimina" data-comune="${escapeHtml(s.comune)}" style="color:var(--red)">elimina</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="grid-3" style="margin-top:14px">
+        <label class="field"><span class="lbl">Comune</span><input type="text" id="sede-nuova-comune" placeholder="Es. VERONA"></label>
+        <label class="field"><span class="lbl">Indirizzo</span><input type="text" id="sede-nuova-indirizzo" placeholder="Via, civico, città"></label>
+        <label class="field"><span class="lbl">CAP sede (opzionale)</span><input type="text" id="sede-nuova-cap" placeholder="Es. 37100"></label>
+      </div>
+      <div class="grid-3">
+        <label class="field"><span class="lbl">Transito da magazzino (giorni)</span><input type="number" min="1" id="sede-nuova-transito" value="1"></label>
+        <label class="field"><span class="lbl">Assegnata a</span>
+          <select id="sede-nuova-owner">
+            <option value="nessuno">Solo Admin</option>
+            <option value="eva">Eva</option>
+            <option value="leo">Leo</option>
+          </select>
+        </label>
+      </div>
+      <button class="btn btn-primary btn-sm" id="sede-aggiungi">Aggiungi sede</button>
+    </div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="section-title">Gestione tecnici</div>
+      <div class="section-sub">Aggiungi o rimuovi tecnici dall'organico. Lo storico job/disponibilità di un tecnico eliminato resta comunque nei dati.</div>
+      <table class="data">
+        <thead><tr><th>Nome</th><th>Sede</th><th>Competenza</th><th></th></tr></thead>
+        <tbody>
+          ${tecnici.map(t => `
+            <tr>
+              <td><strong>${escapeHtml(t.nome)}</strong></td>
+              <td>${escapeHtml(t.comune || '—')}</td>
+              <td>${escapeHtml(t.competenza || '')}</td>
+              <td><button class="link-btn tec-elimina" data-nome="${escapeHtml(t.nome)}" style="color:var(--red)">elimina</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="grid-3" style="margin-top:14px">
+        <label class="field"><span class="lbl">Nome e cognome</span><input type="text" id="tec-nuovo-nome" placeholder="Es. LUCA VERDI"></label>
+        <label class="field">
+          <span class="lbl">Sede</span>
+          <select id="tec-nuovo-comune">
+            ${sedi.map(s => `<option value="${escapeHtml(s.comune)}">${escapeHtml(s.comune)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="field"><span class="lbl">Competenza (opzionale)</span><input type="text" id="tec-nuovo-competenza" placeholder="Es. SKILLED"></label>
+      </div>
+      <button class="btn btn-primary btn-sm" id="tec-aggiungi">Aggiungi tecnico</button>
+    </div>` : ''}
     <div class="panel" style="margin-bottom:16px">
       <div class="section-title">Imposta stato per periodo</div>
       <div class="section-sub">Utile per ferie o assenze di più giorni: applica lo stesso stato a un intervallo di date in un solo passaggio.</div>
@@ -2272,6 +2453,33 @@ function renderTecnici(c) {
   c.querySelectorAll('[data-reset]').forEach(btn => {
     btn.onclick = () => resetPasswordFor(btn.dataset.reset);
   });
+  c.querySelectorAll('.sede-owner-select').forEach(sel => {
+    sel.onchange = () => cambiaAssegnazioneSede(sel.dataset.comune, sel.value, c);
+  });
+  c.querySelectorAll('.sede-elimina').forEach(btn => {
+    btn.onclick = () => eliminaSede(btn.dataset.comune, c);
+  });
+  const sedeAggiungiBtn = document.getElementById('sede-aggiungi');
+  if (sedeAggiungiBtn) sedeAggiungiBtn.onclick = () => {
+    aggiungiSede({
+      comune: document.getElementById('sede-nuova-comune').value,
+      indirizzo: document.getElementById('sede-nuova-indirizzo').value,
+      cap: document.getElementById('sede-nuova-cap').value,
+      transitoGiorni: document.getElementById('sede-nuova-transito').value,
+      assegnata: document.getElementById('sede-nuova-owner').value,
+    }, c);
+  };
+  c.querySelectorAll('.tec-elimina').forEach(btn => {
+    btn.onclick = () => eliminaTecnico(btn.dataset.nome, c);
+  });
+  const tecAggiungiBtn = document.getElementById('tec-aggiungi');
+  if (tecAggiungiBtn) tecAggiungiBtn.onclick = () => {
+    aggiungiTecnico({
+      nome: document.getElementById('tec-nuovo-nome').value,
+      comune: document.getElementById('tec-nuovo-comune').value,
+      competenza: document.getElementById('tec-nuovo-competenza').value,
+    }, c);
+  };
   state._prefillRange = null;
   document.getElementById('tc-range-applica').onclick = async () => {
     const nome = document.getElementById('tc-range-nome').value;
