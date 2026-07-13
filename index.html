@@ -1704,8 +1704,10 @@ function renderAgenda(c) {
   const verificaBox = document.getElementById('ag-verifica');
   let vHtml = '';
   if (daVerificare.length) {
-    vHtml += `<div class="banner banner-warn"><div>⚠</div><div>
-      <strong>${daVerificare.length} job da verificare</strong> (CAP non coperto) per il ${fmtDate(data)}: ${daVerificare.map(j => `${escapeHtml(j.cliente)} (${escapeHtml(j.cap)})`).join(', ')}
+    vHtml += `<div class="banner banner-warn"><div>⚠</div><div style="flex:1">
+      <strong>${daVerificare.length} job da verificare</strong> (CAP non coperto) per il ${fmtDate(data)}:
+      ${daVerificare.map(j => `<span style="display:inline-block;margin:2px 8px 2px 0">${escapeHtml(j.cliente)} (${escapeHtml(j.cap)}) <button class="link-btn ag-elimina-verifica" data-id="${j.id}" style="color:var(--red)">elimina</button></span>`).join('')}
+      <div style="font-size:12px;color:var(--ink-soft);margin-top:4px">Il CAP non risulta coperto da nessuna sede: elimina il job se non è valido, oppure correggi il CAP creandolo di nuovo con quello giusto.</div>
     </div></div>`;
   }
   if (inLavorazione.length) {
@@ -1716,6 +1718,9 @@ function renderAgenda(c) {
   verificaBox.innerHTML = vHtml;
   const gotoBtn = document.getElementById('goto-pianifica');
   if (gotoBtn) gotoBtn.onclick = () => { state.tab = 'proposte'; refreshAndRender(); };
+  c.querySelectorAll('.ag-elimina-verifica').forEach(btn => {
+    btn.onclick = () => eliminaJobDaVerificare(btn.dataset.id, c);
+  });
 
   const comuniDaMostrare = state.sedeFilterAgenda === 'TUTTE' ? scope : [state.sedeFilterAgenda];
   const list = document.getElementById('ag-list');
@@ -2379,6 +2384,15 @@ async function eliminaJobProposta(jobId, c) {
   const jobs = state.jobs.filter(j => j.id !== jobId);
   const ok = await saveJobs(jobs);
   if (ok) { state.jobs = jobs; toast('Job eliminato'); renderProposte(c); }
+  else toast('Errore nel salvataggio, riprova.');
+}
+
+async function eliminaJobDaVerificare(jobId, c) {
+  if (!confirm("Eliminare definitivamente questo job? L'operazione non è reversibile.")) return;
+  await refreshData();
+  const jobs = state.jobs.filter(j => j.id !== jobId);
+  const ok = await saveJobs(jobs);
+  if (ok) { state.jobs = jobs; toast('Job eliminato'); renderAgenda(c); }
   else toast('Errore nel salvataggio, riprova.');
 }
 
