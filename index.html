@@ -351,9 +351,12 @@ table.ferie td.ferie-cell:hover{outline:2px solid var(--brand);outline-offset:-2
 // Planner Officina Mobile — logica applicativa
 // ============================================================
 const BUNDLE = JSON.parse(document.getElementById('bundle-data').textContent);
-const { parametri, centri, capMap, roles } = BUNDLE;
+const { parametri, centri, roles } = BUNDLE;
+let capMap = {}; // popolato da loadAnagrafica() (dal database, con migrazione dal bundle al primo avvio)
 const CAPACITA_MIN = 480; // capacità netta giornaliera per tecnico
 const SOGLIA_GIALLO = 540;
+const TARGET_JOB_GIORNO = 3; // target di interventi/giorno per tecnico e furgone
+const BUDGET_MEDIO_PER_JOB = CAPACITA_MIN / TARGET_JOB_GIORNO; // 160 min: percorrenza+lavorazione "sostenibile" per intervento, in media, per restare nel target
 
 // ---------- OpenRouteService: verifica sede più vicina in tempo reale ----------
 const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjQ1NGFiNGZjOGMwNjQ4ZjNiYjhlMjU3YjJlMWVjOTFmIiwiaCI6Im11cm11cjY0In0=';
@@ -463,10 +466,11 @@ function rebuildIndici() {
 async function loadAnagrafica() {
   try {
     await window.__firebaseReady;
-    const [vSedi, vTecnici, vOwner] = await Promise.all([
+    const [vSedi, vTecnici, vOwner, vCapMap] = await Promise.all([
       window.__fsGet('sedi_custom'),
       window.__fsGet('tecnici_custom'),
       window.__fsGet('sede_owner'),
+      window.__fsGet('capmap_custom'),
     ]);
     if (vSedi && vTecnici) {
       const parsedSedi = JSON.parse(vSedi);
@@ -493,18 +497,45 @@ async function loadAnagrafica() {
         window.__fsSet('sede_owner', JSON.stringify(sedeOwner)),
       ]);
     }
+    if (vCapMap) {
+      const parsedCapMap = JSON.parse(vCapMap);
+      if (parsedCapMap && typeof parsedCapMap === 'object' && !Array.isArray(parsedCapMap)) {
+        capMap = parsedCapMap;
+      } else {
+        throw new Error('capmap_custom non è un oggetto valido');
+      }
+    } else {
+      // Primo avvio: migra la Matrice_CAP originale (indicizzata per centro) al nuovo formato
+      // per comune diretto, così le sedi nuove non hanno bisogno di un "centro" fittizio.
+      const migrata = {};
+      Object.entries(BUNDLE.capMap).forEach(([cap, entry]) => {
+        const [centroIdx, tempo] = entry;
+        const centro = centri[centroIdx];
+        migrata[cap] = [centro ? centro.comune : null, tempo];
+      });
+      capMap = migrata;
+      await window.__fsSet('capmap_custom', JSON.stringify(capMap));
+    }
   } catch (e) {
     console.error('caricamento anagrafica fallito, uso i dati di riserva', e);
     sedi = BUNDLE.sedi.slice();
     const addrFallback = {}; sedi.forEach(s => { addrFallback[s.sede] = s.comune; });
     tecnici = BUNDLE.tecnici.map(t => ({ nome: t.nome, comune: addrFallback[t.sede] || null, competenza: t.competenza }));
     sedeOwner = {};
+    const capMapFallback = {};
+    Object.entries(BUNDLE.capMap).forEach(([cap, entry]) => {
+      const [centroIdx, tempo] = entry;
+      const centroFallback = centri[centroIdx];
+      capMapFallback[cap] = [centroFallback ? centroFallback.comune : null, tempo];
+    });
+    capMap = capMapFallback;
   }
   rebuildIndici();
 }
 async function saveSediCustom() { try { await window.__firebaseReady; await window.__fsSet('sedi_custom', JSON.stringify(sedi)); return true; } catch (e) { console.error(e); return false; } }
 async function saveTecniciCustom() { try { await window.__firebaseReady; await window.__fsSet('tecnici_custom', JSON.stringify(tecnici)); return true; } catch (e) { console.error(e); return false; } }
 async function saveSedeOwner() { try { await window.__firebaseReady; await window.__fsSet('sede_owner', JSON.stringify(sedeOwner)); return true; } catch (e) { console.error(e); return false; } }
+async function saveCapMapCustom() { try { await window.__firebaseReady; await window.__fsSet('capmap_custom', JSON.stringify(capMap)); return true; } catch (e) { console.error(e); return false; } }
 
 const parametriByTipo = {};
 parametri.forEach(p => { parametriByTipo[p.tipo] = p; });
@@ -515,9 +546,8 @@ function lookupCap(cap) {
   const normalized = String(parseInt(cleaned, 10)); // rimuove eventuali zeri iniziali, es. "00058" -> "58"
   const entry = capMap[normalized];
   if (!entry) return null;
-  const [centroIdx, tempo] = entry;
-  const centro = centri[centroIdx];
-  return { centro, tempo: tempo == null ? null : tempo };
+  const [comune, tempo] = entry;
+  return { comune: comune || null, tempo: tempo == null ? null : tempo };
 }
 
 function semaforo(min) {
@@ -959,6 +989,115 @@ async function eliminaTecnico(nome, c) {
   else toast('Errore nel salvataggio, riprova.');
 }
 
+// ---------- ricerca CAP vicini a una sede (limitata alla stessa provincia, per non esaurire la quota gratuita) ----------
+const CAP_SCAN_MAX_CANDIDATI = 150; // limite di sicurezza sulle chiamate API per singola scansione
+
+function candidatiCapProvincia(nuovoComune, capSede) {
+  const cleaned = String(capSede || '').replace(/\D/g, '');
+  if (cleaned.length < 2) return [];
+  const prefisso = cleaned.slice(0, 2);
+  return Object.entries(capMap)
+    .filter(([cap, entry]) => cap.padStart(5, '0').startsWith(prefisso) && entry[0] !== nuovoComune)
+    .slice(0, CAP_SCAN_MAX_CANDIDATI);
+}
+
+async function scansionaCapVicini(comune, c) {
+  const sedeInfo = sedeByComune[comune];
+  if (!sedeInfo || !sedeInfo.cap) { toast('Questa sede non ha un CAP impostato: non posso cercare zone vicine.'); return; }
+  const candidati = candidatiCapProvincia(comune, sedeInfo.cap);
+  if (!candidati.length) { toast('Nessun CAP della stessa provincia trovato da confrontare.'); return; }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'capscan-modal-root';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal-card"><div class="modal-title">Ricerca CAP vicini a ${escapeHtml(comune)}</div><div class="modal-sub" id="capscan-progress">Preparazione…</div></div>`;
+  document.body.appendChild(overlay);
+  const setProgress = txt => { const el = document.getElementById('capscan-progress'); if (el) el.textContent = txt; };
+
+  try {
+    const coords = await ensureSediCoords(); // geocodifica anche la sede nuova, se manca
+    const sedeCoord = coords[comune];
+    if (!sedeCoord) { overlay.remove(); toast("Impossibile geocodificare l'indirizzo della sede."); return; }
+
+    const capCoords = [];
+    for (let i = 0; i < candidati.length; i++) {
+      setProgress(`Verifica CAP ${i + 1} di ${candidati.length}… (${candidati[i][0]})`);
+      try { capCoords.push(await orsGeocode(`${candidati[i][0]}, Italia`)); }
+      catch (e) { capCoords.push(null); }
+      await new Promise(r => setTimeout(r, 250)); // rispetta i limiti di frequenza dell'API gratuita
+    }
+
+    const validIdx = capCoords.map((cc, i) => cc ? i : null).filter(i => i !== null);
+    if (!validIdx.length) { overlay.remove(); toast('Nessun CAP geocodificato con successo, riprova più tardi.'); return; }
+
+    setProgress('Calcolo distanze…');
+    const locations = [[sedeCoord.lon, sedeCoord.lat], ...validIdx.map(i => [capCoords[i].lon, capCoords[i].lat])];
+    const result = await orsMatrix(locations, [0], validIdx.map((_, k) => k + 1));
+    const durations = (result.durations && result.durations[0]) || [];
+
+    const proposte = [];
+    validIdx.forEach((origIdx, k) => {
+      const [cap, entry] = candidati[origIdx];
+      const [comuneAttuale, tempoAttuale] = entry;
+      const sec = durations[k];
+      if (sec == null) return;
+      const nuovoTempo = Math.round(sec / 60) * 2; // andata/ritorno stimato
+      if (tempoAttuale == null || (tempoAttuale - nuovoTempo) >= SOGLIA_SUGGERIMENTO_MIN) {
+        proposte.push({ cap, comuneAttuale, tempoAttuale, nuovoTempo });
+      }
+    });
+    overlay.remove();
+    mostraProposteCapVicini(comune, proposte, c);
+  } catch (e) {
+    console.error('scansione CAP vicini fallita', e);
+    overlay.remove();
+    toast('Ricerca non riuscita: controlla la connessione e riprova.');
+  }
+}
+
+function mostraProposteCapVicini(comune, proposte, c) {
+  const overlay = document.createElement('div');
+  overlay.id = 'capscan-result-root';
+  overlay.className = 'modal-overlay';
+  if (!proposte.length) {
+    overlay.innerHTML = `<div class="modal-card">
+      <div class="modal-title">Nessuna proposta</div>
+      <div class="empty-state">Nessun CAP della zona risulta più vicino a ${escapeHtml(comune)} rispetto alla sede già assegnata.</div>
+      <button class="btn btn-ghost" id="capscan-chiudi" style="margin-top:14px;width:100%">Chiudi</button>
+    </div>`;
+    document.body.appendChild(overlay);
+    document.getElementById('capscan-chiudi').onclick = () => overlay.remove();
+    return;
+  }
+  overlay.innerHTML = `<div class="day-modal-card">
+    <button class="day-modal-close" id="capscan-close">×</button>
+    <div class="modal-title">CAP più vicini a ${escapeHtml(comune)}</div>
+    <div class="modal-sub">${proposte.length} CAP risultano più vicini (almeno ${SOGLIA_SUGGERIMENTO_MIN} min in meno, o senza dato precedente). Seleziona quali riassegnare.</div>
+    ${proposte.map((p, i) => `
+      <label class="pill-choice selected" style="cursor:pointer">
+        <input type="checkbox" class="capscan-check" data-idx="${i}" checked style="width:auto">
+        <div class="pc-main">
+          <div class="pc-name">CAP ${escapeHtml(p.cap)}</div>
+          <div class="pc-meta">${escapeHtml(p.comuneAttuale || '—')} (${p.tempoAttuale ?? '—'} min) → <strong>${escapeHtml(comune)}</strong> (${p.nuovoTempo} min)</div>
+        </div>
+      </label>`).join('')}
+    <button class="btn btn-primary" id="capscan-applica" style="width:100%;margin-top:10px">Riassegna selezionati</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  document.getElementById('capscan-close').onclick = () => overlay.remove();
+  document.getElementById('capscan-applica').onclick = async () => {
+    const checked = Array.from(document.querySelectorAll('.capscan-check:checked')).map(el => Number(el.dataset.idx));
+    if (!checked.length) { overlay.remove(); return; }
+    await refreshData();
+    checked.forEach(i => { const p = proposte[i]; capMap[p.cap] = [comune, p.nuovoTempo]; });
+    const ok = await saveCapMapCustom();
+    overlay.remove();
+    if (ok) { toast(`${checked.length} CAP riassegnati a ${comune}`); renderTecnici(c); }
+    else toast('Errore nel salvataggio, riprova.');
+  };
+}
+
 
 let pollHandle = null;
 async function renderShell() {
@@ -1127,7 +1266,7 @@ function renderNuovoJob(c) {
   state._formCache = f;
 
   const lookup = f.cap ? lookupCap(f.cap) : null;
-  const comuneBase = lookup && lookup.centro.comune ? lookup.centro.comune : null;
+  const comuneBase = lookup && lookup.comune ? lookup.comune : null;
   const nonCoperto = f.cap && (!lookup || !comuneBase);
   const comune = f._comuneOverride || comuneBase; // sede effettiva (eventualmente cambiata su suggerimento di vicinanza)
   const param = parametriByTipo[f.tipo];
@@ -1140,8 +1279,16 @@ function renderNuovoJob(c) {
     ? (() => {
         const migliore = vicinanza.risultati[0];
         const assegnata = vicinanza.risultati.find(r => r.comune === comuneBase);
-        if (migliore.comune !== comuneBase && assegnata && (assegnata.minutiAndata - migliore.minutiAndata) >= SOGLIA_SUGGERIMENTO_MIN) {
-          return { migliore, assegnata };
+        if (!assegnata || migliore.comune === comuneBase) return null;
+        const paramCorrente = parametriByTipo[f.tipo];
+        const budgetPercorrenzaAR = BUDGET_MEDIO_PER_JOB - paramCorrente.durata; // percorrenza A/R sostenibile per questo tipo di lavoro
+        const percorrenzaAttualeAR = assegnata.minutiAndata * 2;
+        const percorrenzaNuovaAR = migliore.minutiAndata * 2;
+        const superaBudgetOra = percorrenzaAttualeAR > budgetPercorrenzaAR;
+        const rientraDopoCambio = percorrenzaNuovaAR <= budgetPercorrenzaAR;
+        const risparmioForte = (percorrenzaAttualeAR - percorrenzaNuovaAR) >= SOGLIA_SUGGERIMENTO_MIN;
+        if ((superaBudgetOra && rientraDopoCambio) || risparmioForte) {
+          return { migliore, assegnata, superaBudgetOra, rientraDopoCambio, budgetPercorrenzaAR, percorrenzaAttualeAR, percorrenzaNuovaAR };
         }
         return null;
       })()
@@ -1182,8 +1329,8 @@ function renderNuovoJob(c) {
             <input type="text" id="in-cap" placeholder="Es. 40132" value="${escapeHtml(f.cap)}" inputmode="numeric">
           </label>
           <label class="field">
-            <span class="lbl">Cliente</span>
-            <input type="text" id="in-cliente" placeholder="Nome cliente / rif." value="${escapeHtml(f.cliente)}">
+            <span class="lbl">Numero Job</span>
+            <input type="text" id="in-cliente" placeholder="Numero job / rif." value="${escapeHtml(f.cliente)}">
           </label>
         </div>
 
@@ -1199,7 +1346,7 @@ function renderNuovoJob(c) {
           <textarea id="in-note" placeholder="Dettagli aggiuntivi...">${escapeHtml(f.note)}</textarea>
         </label>
 
-        ${f.cap ? renderVicinanzaBanner({ nonCoperto, vicinanza, suggerimento, comuneBase, override: f._comuneOverride }) : ''}
+        ${f.cap ? renderVicinanzaBanner({ nonCoperto, vicinanza, suggerimento, comuneBase, override: f._comuneOverride, tempoEffettivo, param, tempoTotale }) : ''}
         ${f.cap ? renderPreviewBox({ nonCoperto, comune, lookup, param, tempoTotale, tempoEffettivo, stato, fuoriZona, tempoMancante, f }) : ''}
       </div>
 
@@ -1285,10 +1432,30 @@ function renderNuovoJob(c) {
   };
 }
 
-function renderVicinanzaBanner({ nonCoperto, vicinanza, suggerimento, comuneBase, override }) {
+function renderVicinanzaBanner({ nonCoperto, vicinanza, suggerimento, comuneBase, override, tempoEffettivo, param, tempoTotale }) {
   if (nonCoperto) return '';
+
+  // Avviso indipendente: anche con la sede migliore possibile, il tempo di percorrenza resta troppo
+  // alto per il target di 3 interventi/giorno -> quella giornata va pianificata con meno lavori.
+  let avvisoGiornataRidotta = '';
+  if (param && tempoTotale != null) {
+    const percorrenzaMigliorePossibileAR = (vicinanza && vicinanza.risultati && vicinanza.risultati.length)
+      ? vicinanza.risultati[0].minutiAndata * 2
+      : tempoEffettivo;
+    const budgetPercorrenzaAR = BUDGET_MEDIO_PER_JOB - param.durata;
+    if (percorrenzaMigliorePossibileAR != null && percorrenzaMigliorePossibileAR > budgetPercorrenzaAR) {
+      const tempoTotaleMinimoStimato = percorrenzaMigliorePossibileAR + param.durata;
+      const residuo = Math.max(0, CAPACITA_MIN - tempoTotaleMinimoStimato);
+      const jobAggiuntivi = Math.max(0, Math.floor(residuo / BUDGET_MEDIO_PER_JOB));
+      avvisoGiornataRidotta = `<div class="banner banner-warn" style="margin-bottom:12px">
+        <div>⏱</div>
+        <div>Questo intervento ha una percorrenza A/R (~${percorrenzaMigliorePossibileAR} min) alta anche dalla sede più vicina possibile: da sola "consuma" più del budget medio per il target di ${TARGET_JOB_GIORNO} interventi/giorno. Per il tecnico che lo prende quel giorno, prevedi realisticamente al massimo <strong>${jobAggiuntivi} intervento${jobAggiuntivi === 1 ? '' : 'i'} in più</strong> (non il target pieno), oppure valuta di spostarlo su un giorno con meno altri interventi.</div>
+      </div>`;
+    }
+  }
+
   if (override) {
-    return `<div class="banner banner-info" style="margin-bottom:12px">
+    return avvisoGiornataRidotta + `<div class="banner banner-info" style="margin-bottom:12px">
       <div>🧭</div>
       <div style="flex:1">Instradato a <strong>${escapeHtml(override)}</strong> invece di ${escapeHtml(comuneBase)} (verifica in tempo reale con OpenRouteService).
         <button class="link-btn vic-annulla" style="color:var(--brand-dark);font-weight:700;margin-left:6px">Annulla, usa ${escapeHtml(comuneBase)}</button>
@@ -1296,17 +1463,20 @@ function renderVicinanzaBanner({ nonCoperto, vicinanza, suggerimento, comuneBase
     </div>`;
   }
   if (vicinanza && vicinanza.loading) {
-    return `<div class="banner banner-info" style="margin-bottom:12px"><div>🧭</div><div>Verifica sede più vicina in corso…</div></div>`;
+    return avvisoGiornataRidotta + `<div class="banner banner-info" style="margin-bottom:12px"><div>🧭</div><div>Verifica sede più vicina in corso…</div></div>`;
   }
   if (suggerimento) {
-    return `<div class="banner banner-warn" style="margin-bottom:12px">
+    const motivoCapacita = suggerimento.superaBudgetOra && suggerimento.rientraDopoCambio
+      ? `Con <strong>${escapeHtml(comuneBase)}</strong> la percorrenza A/R (~${suggerimento.percorrenzaAttualeAR} min) supera il tempo sostenibile per il target di ${TARGET_JOB_GIORNO} interventi/giorno (~${Math.round(suggerimento.budgetPercorrenzaAR)} min per questo tipo di lavoro); con <strong>${escapeHtml(suggerimento.migliore.comune)}</strong> (~${suggerimento.percorrenzaNuovaAR} min) si rientra nel target.`
+      : `Percorrenza A/R stimata: ${escapeHtml(comuneBase)} ~${suggerimento.percorrenzaAttualeAR} min, ${escapeHtml(suggerimento.migliore.comune)} ~${suggerimento.percorrenzaNuovaAR} min.`;
+    return avvisoGiornataRidotta + `<div class="banner banner-warn" style="margin-bottom:12px">
       <div>🧭</div>
-      <div style="flex:1">Questo CAP risulta più vicino a <strong>${escapeHtml(suggerimento.migliore.comune)}</strong> (~${suggerimento.migliore.minutiAndata} min di sola andata) rispetto alla sede assegnata <strong>${escapeHtml(comuneBase)}</strong> (~${suggerimento.assegnata.minutiAndata} min).
+      <div style="flex:1">Questo CAP risulta più vicino a <strong>${escapeHtml(suggerimento.migliore.comune)}</strong> rispetto alla sede assegnata <strong>${escapeHtml(comuneBase)}</strong>. ${motivoCapacita}
         <button class="btn btn-sm btn-primary vic-usa" data-comune="${escapeHtml(suggerimento.migliore.comune)}" style="margin-left:6px">Usa ${escapeHtml(suggerimento.migliore.comune)}</button>
       </div>
     </div>`;
   }
-  return '';
+  return avvisoGiornataRidotta;
 }
 
 
@@ -1723,7 +1893,7 @@ function renderTechRow(t, data) {
 
 function exportCsv(scope, data) {
   const jobs = state.jobs.filter(j => scope.includes(j.comune) && j.data === data);
-  const header = ['Data','Cliente','CAP','Comune','Tipo Lavoro','Tempo Percorrenza','Durata','Tempo Totale','Semaforo','Tecnici','Stato','Note'];
+  const header = ['Data','Numero Job','CAP','Comune','Tipo Lavoro','Tempo Percorrenza','Durata','Tempo Totale','Semaforo','Tecnici','Stato','Note'];
   const rows = jobs.map(j => [j.data, j.cliente, j.cap, j.comune, j.tipoLavoro, j.tempoPercorrenza, j.durata, j.tempoTotale, j.semaforo, (j.tecnici||[]).join(' + '), j.stato, j.note]);
   const csv = [header, ...rows].map(r => r.map(v => `"${String(v == null ? '' : v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -2332,7 +2502,7 @@ function renderTecnici(c) {
     ${isAdmin ? `
     <div class="panel" style="margin-bottom:16px">
       <div class="section-title">Gestione sedi</div>
-      <div class="section-sub">Aggiungi o rimuovi filiali. Una sede nuova non ha ancora CAP automaticamente instradati: usa il suggerimento "sede più vicina" in Nuovo Job per instradarci i primi job.</div>
+      <div class="section-sub">Aggiungi o rimuovi filiali. Se inserisci il CAP della sede, dopo la creazione puoi usare "🔍 CAP vicini" per trovare e riassegnare i codici postali della stessa provincia più vicini a questa sede (basato su distanze reali).</div>
       <table class="data">
         <thead><tr><th>Comune</th><th>Indirizzo</th><th>Transito</th><th>Assegnata a</th><th></th></tr></thead>
         <tbody>
@@ -2348,7 +2518,10 @@ function renderTecnici(c) {
                   <option value="leo" ${sedeOwner[s.comune]==='leo' ? 'selected' : ''}>Leo</option>
                 </select>
               </td>
-              <td><button class="link-btn sede-elimina" data-comune="${escapeHtml(s.comune)}" style="color:var(--red)">elimina</button></td>
+              <td>
+                ${s.cap ? `<button class="link-btn sede-scan-cap" data-comune="${escapeHtml(s.comune)}" style="color:var(--brand-dark)">🔍 CAP vicini</button> · ` : ''}
+                <button class="link-btn sede-elimina" data-comune="${escapeHtml(s.comune)}" style="color:var(--red)">elimina</button>
+              </td>
             </tr>`).join('')}
         </tbody>
       </table>
@@ -2458,6 +2631,9 @@ function renderTecnici(c) {
   });
   c.querySelectorAll('.sede-elimina').forEach(btn => {
     btn.onclick = () => eliminaSede(btn.dataset.comune, c);
+  });
+  c.querySelectorAll('.sede-scan-cap').forEach(btn => {
+    btn.onclick = () => scansionaCapVicini(btn.dataset.comune, c);
   });
   const sedeAggiungiBtn = document.getElementById('sede-aggiungi');
   if (sedeAggiungiBtn) sedeAggiungiBtn.onclick = () => {
