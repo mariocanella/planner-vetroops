@@ -2495,6 +2495,8 @@ function renderTecnici(c) {
   const data = state.selectedDateTecnici;
   const list = tecnici.filter(t => scope.includes(t.comune));
   const isAdmin = roles[state.user].admin;
+  if (!state._rangePanel) state._rangePanel = { nome: '', da: data, a: data, tipo: isAdmin ? 'ferie' : 'malattia', nota: '' };
+  const rp = state._rangePanel;
 
   c.innerHTML = `
     ${isAdmin ? `
@@ -2590,32 +2592,33 @@ function renderTecnici(c) {
         <label class="field">
           <span class="lbl">Tecnico</span>
           <select id="tc-range-nome">
-            ${list.map(t => `<option value="${escapeHtml(t.nome)}" ${state._prefillRange && state._prefillRange.nome === t.nome ? 'selected' : ''}>${escapeHtml(t.nome)} · ${escapeHtml(t.comune)}</option>`).join('')}
+            <option value="" ${!rp.nome ? 'selected' : ''}>-- seleziona tecnico --</option>
+            ${list.map(t => `<option value="${escapeHtml(t.nome)}" ${rp.nome === t.nome ? 'selected' : ''}>${escapeHtml(t.nome)} · ${escapeHtml(t.comune)}</option>`).join('')}
           </select>
         </label>
         <label class="field">
           <span class="lbl">Dal</span>
-          <input type="date" id="tc-range-da" value="${state._prefillRange ? state._prefillRange.da : data}">
+          <input type="date" id="tc-range-da" value="${rp.da}">
         </label>
         <label class="field">
           <span class="lbl">Al</span>
-          <input type="date" id="tc-range-a" value="${state._prefillRange ? state._prefillRange.a : data}">
+          <input type="date" id="tc-range-a" value="${rp.a}">
         </label>
       </div>
       <div class="grid-2">
         <label class="field">
           <span class="lbl">Stato</span>
           <select id="tc-range-stato">
-            ${isAdmin ? '<option value="ferie">Ferie</option>' : ''}
-            <option value="malattia">Malattia</option>
-            <option value="infortunio">Infortunio</option>
-            <option value="indisponibile">Indisponibile</option>
-            <option value="disponibile">Disponibile (rimuove eventuali blocchi nel periodo)</option>
+            ${isAdmin ? `<option value="ferie" ${rp.tipo==='ferie'?'selected':''}>Ferie</option>` : ''}
+            <option value="malattia" ${rp.tipo==='malattia'?'selected':''}>Malattia</option>
+            <option value="infortunio" ${rp.tipo==='infortunio'?'selected':''}>Infortunio</option>
+            <option value="indisponibile" ${rp.tipo==='indisponibile'?'selected':''}>Indisponibile</option>
+            <option value="disponibile" ${rp.tipo==='disponibile'?'selected':''}>Disponibile (rimuove eventuali blocchi nel periodo)</option>
           </select>
         </label>
         <label class="field">
           <span class="lbl">Nota (opzionale)</span>
-          <input type="text" id="tc-range-nota" placeholder="facoltativa">
+          <input type="text" id="tc-range-nota" value="${escapeHtml(rp.nota)}" placeholder="facoltativa">
         </label>
       </div>
       <div id="tc-range-error" class="hint warn" style="margin-bottom:10px"></div>
@@ -2670,7 +2673,11 @@ function renderTecnici(c) {
       competenza: document.getElementById('tec-nuovo-competenza').value,
     }, c);
   };
-  state._prefillRange = null;
+  document.getElementById('tc-range-nome').onchange = e => { state._rangePanel.nome = e.target.value; };
+  document.getElementById('tc-range-da').oninput = e => { state._rangePanel.da = e.target.value; };
+  document.getElementById('tc-range-a').oninput = e => { state._rangePanel.a = e.target.value; };
+  document.getElementById('tc-range-stato').onchange = e => { state._rangePanel.tipo = e.target.value; };
+  document.getElementById('tc-range-nota').oninput = e => { state._rangePanel.nota = e.target.value; };
   document.getElementById('tc-range-applica').onclick = async () => {
     const nome = document.getElementById('tc-range-nome').value;
     const da = document.getElementById('tc-range-da').value;
@@ -2678,9 +2685,11 @@ function renderTecnici(c) {
     const tipo = document.getElementById('tc-range-stato').value;
     const nota = document.getElementById('tc-range-nota').value;
     const errBox = document.getElementById('tc-range-error');
+    if (!nome) { errBox.textContent = 'Seleziona un tecnico.'; return; }
     if (!da || !a) { errBox.textContent = 'Indica data inizio e fine.'; return; }
     if (a < da) { errBox.textContent = 'La data finale deve essere uguale o successiva a quella iniziale.'; return; }
     errBox.textContent = '';
+    state._rangePanel = { nome: '', da: state.selectedDateTecnici, a: state.selectedDateTecnici, tipo: isAdmin ? 'ferie' : 'malattia', nota: '' };
     await applyDispoRange(nome, da, a, tipo, nota, c);
   };
 
