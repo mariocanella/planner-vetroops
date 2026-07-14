@@ -557,14 +557,22 @@ function semaforo(min) {
 }
 function semaforoLabel(s) { return s === 'verde' ? 'Verde' : s === 'giallo' ? 'Giallo' : 'Rosso'; }
 
+// Estrae la data ISO (YYYY-MM-DD) usando i componenti LOCALI (anno/mese/giorno),
+// mai tramite toISOString() che converte in UTC e può far retrocedere di un giorno
+// per chi si trova in un fuso orario avanti rispetto a UTC (es. l'Italia).
+function isoFromDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 function todayISO() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return isoFromDate(new Date());
 }
 function addDaysISO(iso, n) {
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return isoFromDate(d);
 }
 function tomorrowISO() { return addDaysISO(todayISO(), 1); }
 function isWeekend(iso) {
@@ -2073,7 +2081,7 @@ function getWeekStartsISOForYear(year) {
   const weeks = [];
   const endOfYear = new Date(year, 11, 31);
   while (d <= endOfYear) {
-    weeks.push(d.toISOString().slice(0, 10));
+    weeks.push(isoFromDate(d));
     d.setDate(d.getDate() + 7);
   }
   return weeks;
